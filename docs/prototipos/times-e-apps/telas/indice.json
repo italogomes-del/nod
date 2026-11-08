@@ -1,0 +1,401 @@
+[
+  {
+    "tela": "E4b-faixa-um-clique",
+    "passo": 1,
+    "rotulo": "conversa-do-time",
+    "png": "telas/E4b-faixa-um-clique-01-conversa-do-time.png",
+    "dica": "Passe o mouse em «Leapy» e veja: nada. Agora na linha «Time Nod»: à direita aparece uma faixa com o glifo do quadro e os avatares dos membros. Um clique no glifo abre o quadro; um clique num avatar abre aquele bot em particular. Fora do hover a faixa some; no time selecionado ela fica."
+  },
+  {
+    "tela": "E4b-faixa-um-clique",
+    "passo": 2,
+    "rotulo": "quadro",
+    "png": "telas/E4b-faixa-um-clique-02-quadro.png",
+    "dica": "Quadro aberto pela faixa (ou pela pílula). Na barra, o selecionado continua sendo o time. A faixa fica visível enquanto o time está selecionado, então voltar ou pular para a Ada continua a um clique."
+  },
+  {
+    "tela": "E4b-faixa-um-clique",
+    "passo": 3,
+    "rotulo": "ada-em-particular",
+    "png": "telas/E4b-faixa-um-clique-03-ada-em-particular.png",
+    "dica": "Ada em particular: só vocês dois. A pílula aponta para o workflow do time."
+  },
+  {
+    "tela": "E5-dez-bots-cinco-apps",
+    "passo": 1,
+    "rotulo": "conversa-do-time",
+    "png": "telas/E5-dez-bots-cinco-apps-01-conversa-do-time.png",
+    "dica": "Time de 10 bots e 5 apps. Em repouso a linha do time é igual à de antes: mosaico, nome, «· 10 · 5 apps», prévia. No hover, a faixa mostra só o essencial: o Quadro, as Aprovações (porque têm 2 com você) e «⋯». O «⋯» abre um painel inline com os 5 apps e os 10 membros, um clique cada."
+  },
+  {
+    "tela": "E5-dez-bots-cinco-apps",
+    "passo": 2,
+    "rotulo": "painel-apps-e-membros",
+    "png": "telas/E5-dez-bots-cinco-apps-02-painel-apps-e-membros.png",
+    "dica": "Time de 10 bots e 5 apps. Em repouso a linha do time é igual à de antes: mosaico, nome, «· 10 · 5 apps», prévia. No hover, a faixa mostra só o essencial: o Quadro, as Aprovações (porque têm 2 com você) e «⋯». O «⋯» abre um painel inline com os 5 apps e os 10 membros, um clique cada."
+  },
+  {
+    "tela": "E5-dez-bots-cinco-apps",
+    "passo": 3,
+    "rotulo": "quadro",
+    "png": "telas/E5-dez-bots-cinco-apps-03-quadro.png",
+    "dica": "App «Quadro» aberto: a barra recolhe; na pílula o modo deixa de ser um nome fixo e vira «Quadro ▾», que abre o menu dos 5 apps. Assim a pílula não cresce com o número de apps."
+  },
+  {
+    "tela": "E5-dez-bots-cinco-apps",
+    "passo": 4,
+    "rotulo": "menu-de-apps",
+    "png": "telas/E5-dez-bots-cinco-apps-04-menu-de-apps.png",
+    "dica": "App «Quadro» aberto: a barra recolhe; na pílula o modo deixa de ser um nome fixo e vira «Quadro ▾», que abre o menu dos 5 apps. Assim a pílula não cresce com o número de apps."
+  },
+  {
+    "tela": "E5-dez-bots-cinco-apps",
+    "passo": 5,
+    "rotulo": "app-metricas",
+    "png": "telas/E5-dez-bots-cinco-apps-05-app-metricas.png",
+    "dica": "App «Métricas» aberto: a barra recolhe; na pílula o modo deixa de ser um nome fixo e vira «Métricas ▾», que abre o menu dos 5 apps. Assim a pílula não cresce com o número de apps."
+  },
+  {
+    "tela": "E5-dez-bots-cinco-apps",
+    "passo": 6,
+    "rotulo": "ada-em-particular",
+    "png": "telas/E5-dez-bots-cinco-apps-06-ada-em-particular.png",
+    "dica": "Ada em particular, igual. A pílula aponta «Time Nod ↗»."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 1,
+    "rotulo": "Porta 1 · arrastar bot sobre bot",
+    "png": "telas/J1-nascer-um-time-01-porta-1-arrastar-bot-sobre-bot.png",
+    "dica": "Porta 1 · Arrastar um bot sobre outro, como pastas no iPhone. O Xumbrega está sendo arrastado sobre a Ada: a Ada ganha o anel azul e o rótulo diz o que vai acontecer. Clique no passo 2 para soltar."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 2,
+    "rotulo": "Soltou: time nasce, grupo abre",
+    "png": "telas/J1-nascer-um-time-02-soltou-time-nasce-grupo-abre.png",
+    "dica": "Soltou: a linha do time nasce em «Times» com o mosaico dos dois, o nome provisório vem dos membros e o grupo já abre com a Ada chamando o Xumbrega. Um toast oferece «Dar nome» e «Desfazer». O Xumbrega continua na lista de bots (meio apagado só aqui, para você ver que ele não saiu de lá)."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 3,
+    "rotulo": "Dar nome (na própria linha)",
+    "png": "telas/J1-nascer-um-time-03-dar-nome-na-propria-linha.png",
+    "dica": "Dar nome: edita-se na própria linha da barra, com o cursor no texto. Nada de formulário. Enter confirma; Esc mantém o nome provisório."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 4,
+    "rotulo": "Porta 2 · «+» › Novo time",
+    "png": "telas/J1-nascer-um-time-04-porta-2-novo-time.png",
+    "dica": "Porta 2 · «+» no topo › «Novo time». A grade de bots vira um seletor: toque em quem entra. Sem formulário de nome: o nome vem dos escolhidos e muda depois pela linha."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 5,
+    "rotulo": "Escolheu 3 · Criar",
+    "png": "telas/J1-nascer-um-time-05-escolheu-3-criar.png",
+    "dica": "Criou com 3: o mosaico mostra os três, o grupo abre, o nome provisório é «Ada, Gil e Xumbrega». Mesmo toast de «Dar nome»."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 6,
+    "rotulo": "Porta 3 · pela fala com a Ada",
+    "png": "telas/J1-nascer-um-time-06-porta-3-pela-fala-com-a-ada.png",
+    "dica": "Porta 3 · Pela fala, com o próprio bot: «chama o Xumbrega e o Gil pra trabalhar com você». Clique no chip."
+  },
+  {
+    "tela": "J1-nascer-um-time",
+    "passo": 7,
+    "rotulo": "A Ada cria o time",
+    "png": "telas/J1-nascer-um-time-07-a-ada-cria-o-time.png",
+    "dica": "A Ada cria o time, conta em uma linha, oferece ir para lá ou desfazer. O time nasce com ela como quem chamou. Na barra, a linha já existe."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 1,
+    "rotulo": "Quadro da Ada · «→ Ada» na coluna",
+    "png": "telas/J2-quadro-nasce-no-bot-01-quadro-da-ada-ada-na-coluna.png",
+    "dica": "1 · Pela interface: no quadro da Ada, cada coluna tem quem cuida («→ Ada»). Clique nele e escolha o Xumbrega. Não existe botão «criar time»: adicionar alguém ao quadro é o ato."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 2,
+    "rotulo": "Escolheu o Xumbrega: virou time",
+    "png": "telas/J2-quadro-nasce-no-bot-02-escolheu-o-xumbrega-virou-time.png",
+    "dica": "2 · Escolheu o Xumbrega: a coluna passa para ele, e uma linha acima do quadro diz o que mudou: virou o time «Ada e Xumbrega». Ali mesmo: «Dar nome», «Levar para o Time Nod» (os dois já estão lá) e «Desfazer». No rail, o mosaico do time surge com anel azul."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 3,
+    "rotulo": "Ou: arrastar o Xumbrega para a coluna",
+    "png": "telas/J2-quadro-nasce-no-bot-03-ou-arrastar-o-xumbrega-para-a-coluna.png",
+    "dica": "3 · Mesma porta, outro gesto: arrastar o Xumbrega da barra para a coluna. A coluna ganha a borda azul e o rótulo diz o resultado. Soltar faz o mesmo que o passo 2."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 4,
+    "rotulo": "Ou: pela fala com a Ada",
+    "png": "telas/J2-quadro-nasce-no-bot-04-ou-pela-fala-com-a-ada.png",
+    "dica": "4 · Pela fala, com a Ada: «coloca o Xumbrega cuidando de Implementando». Clique no chip."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 5,
+    "rotulo": "A Ada faz e conta",
+    "png": "telas/J2-quadro-nasce-no-bot-05-a-ada-faz-e-conta.png",
+    "dica": "5 · A Ada faz e conta em uma linha: o quadro virou do time. Ela oferece nome, levar para o Time Nod, ou desfazer. Não pergunta antes: você já decidiu ao adicionar."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 6,
+    "rotulo": "No time: conversa",
+    "png": "telas/J2-quadro-nasce-no-bot-06-no-time-conversa.png",
+    "dica": "6 · No time: linha de sistema conta a origem; a Ada passa a coluna; o Xumbrega aceita; o evento fica registrado. A pílula da Ada perdeu o modo quadro."
+  },
+  {
+    "tela": "J2-quadro-nasce-no-bot",
+    "passo": 7,
+    "rotulo": "No time: Quadro",
+    "png": "telas/J2-quadro-nasce-no-bot-07-no-time-quadro.png",
+    "dica": "7 · O quadro, agora pela pílula do time. A barra recolhe e o rail mostra o time selecionado."
+  },
+  {
+    "tela": "J3-um-app-novo",
+    "passo": 1,
+    "rotulo": "Pedir no grupo",
+    "png": "telas/J3-um-app-novo-01-pedir-no-grupo.png",
+    "dica": "1 · Um app novo nasce pela fala, no grupo, pedido a um bot. Quem cria vira anfitrião do app. Clique em Enviar."
+  },
+  {
+    "tela": "J3-um-app-novo",
+    "passo": 2,
+    "rotulo": "Frida cria o app",
+    "png": "telas/J3-um-app-novo-02-frida-cria-o-app.png",
+    "dica": "2 · A Frida criou o app e entrou no time por isso. Na barra: «· 2 apps», a faixa ganhou o glifo de Métricas (azul = novo). A pílula e o «⋯» listam o app com o nome da anfitriã."
+  },
+  {
+    "tela": "J3-um-app-novo",
+    "passo": 3,
+    "rotulo": "Métricas aberto",
+    "png": "telas/J3-um-app-novo-03-metricas-aberto.png",
+    "dica": "3 · App aberto: a barra recolhe; a pílula mostra «Métricas ▾». O campo de baixo fala com a anfitriã do app (Frida), não com o time inteiro."
+  },
+  {
+    "tela": "J3-um-app-novo",
+    "passo": 4,
+    "rotulo": "Menu de apps",
+    "png": "telas/J3-um-app-novo-04-menu-de-apps.png",
+    "dica": "2 · A Frida criou o app e entrou no time por isso. Na barra: «· 2 apps», a faixa ganhou o glifo de Métricas (azul = novo). A pílula e o «⋯» listam o app com o nome da anfitriã."
+  },
+  {
+    "tela": "J4-entrar-e-sair",
+    "passo": 1,
+    "rotulo": "Pedir a saída no grupo",
+    "png": "telas/J4-entrar-e-sair-01-pedir-a-saida-no-grupo.png",
+    "dica": "1 · Sair pela fala, no grupo. Clique no chip. Sair nunca apaga o que o bot fez ou disse."
+  },
+  {
+    "tela": "J4-entrar-e-sair",
+    "passo": 2,
+    "rotulo": "Gil saiu · app sem anfitrião",
+    "png": "telas/J4-entrar-e-sair-02-gil-saiu-app-sem-anfitriao.png",
+    "dica": "2 · O Gil saiu: linha de sistema, mosaico e contagem mudam. Como ele era anfitrião do app Protótipos, o app não pode ficar sem dono: a Ada pergunta quem assume, com uma opção padrão (ela mesma)."
+  },
+  {
+    "tela": "J4-entrar-e-sair",
+    "passo": 3,
+    "rotulo": "Ada assume o app",
+    "png": "telas/J4-entrar-e-sair-03-ada-assume-o-app.png",
+    "dica": "3 · A Ada assumiu: evento no grupo e o app passa a listar «Ada» no «⋯»."
+  },
+  {
+    "tela": "J4-entrar-e-sair",
+    "passo": 4,
+    "rotulo": "Ou: «⋯» › Membros › ×",
+    "png": "telas/J4-entrar-e-sair-04-ou-membros.png",
+    "dica": "4 · A outra porta: «⋯» › Membros. Cada linha mostra o papel (anfitrião de quê) e um × no hover. Remover quem é anfitrião dispara a mesma pergunta."
+  },
+  {
+    "tela": "J4-entrar-e-sair",
+    "passo": 5,
+    "rotulo": "Último sai: time vazio",
+    "png": "telas/J4-entrar-e-sair-05-ultimo-sai-time-vazio.png",
+    "dica": "5 · Quando o último bot sai, o time não some: fica vazio e apagado na barra, com os apps parados, e o Nod sugere arquivar ou chamar alguém. Apagar sozinho seria perder o endereço dos apps."
+  },
+  {
+    "tela": "J5-pessoa-no-time",
+    "passo": 1,
+    "rotulo": "Gil pede revisão humana",
+    "png": "telas/J5-pessoa-no-time-01-gil-pede-revisao-humana.png",
+    "dica": "1 · Um gate humano aparece: o Gil quer revisão de produto. Pessoa entra no time pela mesma porta que um bot."
+  },
+  {
+    "tela": "J5-pessoa-no-time",
+    "passo": 2,
+    "rotulo": "«⋯» › + membro › Marina",
+    "png": "telas/J5-pessoa-no-time-02-membro-marina.png",
+    "dica": "2 · «⋯» › «+ membro»: a lista mistura bots e pessoas do Nod; pessoa de fora, por e-mail. Clique em Marina."
+  },
+  {
+    "tela": "J5-pessoa-no-time",
+    "passo": 3,
+    "rotulo": "Marina no time",
+    "png": "telas/J5-pessoa-no-time-03-marina-no-time.png",
+    "dica": "3 · Marina entrou: avatar de pessoa (inicial, sem a forma dos bots) no mosaico, na faixa e na lista. A Ada já diz o papel dela e o que está com ela. Pessoa vê o grupo inteiro."
+  },
+  {
+    "tela": "J5-pessoa-no-time",
+    "passo": 4,
+    "rotulo": "Quadro: card «com Marina»",
+    "png": "telas/J5-pessoa-no-time-04-quadro-card-com-marina.png",
+    "dica": "4 · No quadro: coluna «Revisar → Marina»; o card dela é azul «com Marina» (gate humano intencional, nunca âmbar)."
+  },
+  {
+    "tela": "J5-pessoa-no-time",
+    "passo": 5,
+    "rotulo": "Marina fala e devolve",
+    "png": "telas/J5-pessoa-no-time-05-marina-fala-e-devolve.png",
+    "dica": "5 · Marina fala no grupo como qualquer membro; mover o card vira evento. Bots respondem a ela como a você."
+  },
+  {
+    "tela": "J5-pessoa-no-time",
+    "passo": 6,
+    "rotulo": "Ver como Marina",
+    "png": "telas/J5-pessoa-no-time-06-ver-como-marina.png",
+    "dica": "6 · «Ver como Marina»: o mesmo quadro, mesmo grupo. O que muda é o que ela pode fazer (mover cards, falar; não criar apps nem remover membros). Sem visão reduzida."
+  },
+  {
+    "tela": "J6-bot-em-dois-times",
+    "passo": 1,
+    "rotulo": "Em particular: «o que está parado?»",
+    "png": "telas/J6-bot-em-dois-times-01-em-particular-o-que-esta-parado.png",
+    "dica": "1 · A Ada está em dois times (mosaicos dos dois na barra). Em particular há UMA conversa: ela responde separando por time, cada bloco com o mosaico e o nome do time, e aponta onde está a pendência."
+  },
+  {
+    "tela": "J6-bot-em-dois-times",
+    "passo": 2,
+    "rotulo": "Em particular: o que fica entre nós",
+    "png": "telas/J6-bot-em-dois-times-02-em-particular-o-que-fica-entre-nos.png",
+    "dica": "2 · O particular é particular: o que você diz à Ada sobre o Leapy não vai para o grupo do Leapy. Ela leva para lá só o que for do trabalho, como proposta."
+  },
+  {
+    "tela": "J6-bot-em-dois-times",
+    "passo": 3,
+    "rotulo": "No Leapy, como membro",
+    "png": "telas/J6-bot-em-dois-times-03-no-leapy-como-membro.png",
+    "dica": "3 · No Leapy ela é só um membro: fala quando chamada ou quando é anfitriã do app envolvido. A memória do Produto Nod não vaza para cá."
+  },
+  {
+    "tela": "J6-bot-em-dois-times",
+    "passo": 4,
+    "rotulo": "No Produto Nod, como membro",
+    "png": "telas/J6-bot-em-dois-times-04-no-produto-nod-como-membro.png",
+    "dica": "4 · No Produto Nod, idem. A pílula da Ada em particular mostra os dois times como atalhos («Produto Nod ↗ · Leapy ↗»)."
+  },
+  {
+    "tela": "J7-enquanto-fora",
+    "passo": 1,
+    "rotulo": "Barra ao voltar",
+    "png": "telas/J7-enquanto-fora-01-barra-ao-voltar.png",
+    "dica": "1 · Ao voltar: prévias em negrito nos times e bots com novidade; na faixa de cada time, o app com pendência em azul e a contagem «com você». Nada de faixa âmbar."
+  },
+  {
+    "tela": "J7-enquanto-fora",
+    "passo": 2,
+    "rotulo": "Bandeja «✉»",
+    "png": "telas/J7-enquanto-fora-02-bandeja.png",
+    "dica": "2 · A bandeja «✉» (a de hoje) soma times e bots: primeiro «Com você» por app, depois «Não lidos». Cada item leva direto ao lugar."
+  },
+  {
+    "tela": "J7-enquanto-fora",
+    "passo": 3,
+    "rotulo": "Grupo: resumo da anfitriã",
+    "png": "telas/J7-enquanto-fora-03-grupo-resumo-da-anfitria.png",
+    "dica": "3 · No grupo, um divisor marca quando você saiu, e a anfitriã abre com um resumo de três linhas: feitas, com você, travadas. Resumo é dela, não do sistema."
+  },
+  {
+    "tela": "J7-enquanto-fora",
+    "passo": 4,
+    "rotulo": "Quadro: as 2 com você",
+    "png": "telas/J7-enquanto-fora-04-quadro-as-2-com-voce.png",
+    "dica": "4 · No quadro, a coluna «Com você» concentra as duas: cada card diz o que espera (aprovar, decidir) e tem a ação no próprio card."
+  },
+  {
+    "tela": "J7-enquanto-fora",
+    "passo": 5,
+    "rotulo": "Aprovou uma: contagem cai",
+    "png": "telas/J7-enquanto-fora-05-aprovou-uma-contagem-cai.png",
+    "dica": "5 · Aprovou a ADA-20: a contagem cai na coluna, na faixa da barra e na bandeja, na hora."
+  },
+  {
+    "tela": "J8-arquivar-o-time",
+    "passo": 1,
+    "rotulo": "Fim do ciclo · «⋯» ou fala",
+    "png": "telas/J8-arquivar-o-time-01-fim-do-ciclo-ou-fala.png",
+    "dica": "1 · Duas portas: «⋯» › Arquivar o time, ou pela fala. Clique no chip ou no «⋯»."
+  },
+  {
+    "tela": "J8-arquivar-o-time",
+    "passo": 2,
+    "rotulo": "Confirmar: o que fazer com o app",
+    "png": "telas/J8-arquivar-o-time-02-confirmar-o-que-fazer-com-o-app.png",
+    "dica": "2 · Uma confirmação só, com a pergunta que importa: o que fazer com o app. O Quadro tem anfitriã (Ada), então pode voltar a ser quadro dela: o caminho inverso da J2. Histórico nunca se apaga."
+  },
+  {
+    "tela": "J8-arquivar-o-time",
+    "passo": 3,
+    "rotulo": "Arquivado: quadro volta à Ada",
+    "png": "telas/J8-arquivar-o-time-03-arquivado-quadro-volta-a-ada.png",
+    "dica": "3 · Arquivado: a linha some da barra, toast com «Desfazer». A pílula da Ada recupera o modo «quadro», com todo o conteúdo. A conversa do time fica pesquisável."
+  },
+  {
+    "tela": "J8-arquivar-o-time",
+    "passo": 4,
+    "rotulo": "Depois: buscar e restaurar",
+    "png": "telas/J8-arquivar-o-time-04-depois-buscar-e-restaurar.png",
+    "dica": "4 · Semanas depois: buscar «Lançamentos» encontra o time arquivado, com «Restaurar» e «Ver o histórico». Restaurar traz a linha de volta e o Quadro volta ao time."
+  },
+  {
+    "tela": "J9-primeiro-dia",
+    "passo": 1,
+    "rotulo": "Conta nova: só a Ada",
+    "png": "telas/J9-primeiro-dia-01-conta-nova-so-a-ada.png",
+    "dica": "1 · Conta nova: a barra é só a Ada e um «outro bot». Sem rótulos «Times» e «Bots», sem bandeja, sem faixa. Nada do que ainda não existe aparece."
+  },
+  {
+    "tela": "J9-primeiro-dia",
+    "passo": 2,
+    "rotulo": "Segundo bot",
+    "png": "telas/J9-primeiro-dia-02-segundo-bot.png",
+    "dica": "2 · Segundo bot: a grade ganha o Xumbrega. Ainda sem «Times». A Ada diz, na conversa, como juntar os dois."
+  },
+  {
+    "tela": "J9-primeiro-dia",
+    "passo": 3,
+    "rotulo": "Arrastar: primeiro time",
+    "png": "telas/J9-primeiro-dia-03-arrastar-primeiro-time.png",
+    "dica": "3 · O primeiro time nasce pelo gesto (ou pela fala): anel azul e rótulo, como na J1."
+  },
+  {
+    "tela": "J9-primeiro-dia",
+    "passo": 4,
+    "rotulo": "«Times» aparece com dica presa",
+    "png": "telas/J9-primeiro-dia-04-times-aparece-com-dica-presa.png",
+    "dica": "4 · O rótulo «Times» aparece pela primeira vez, com uma dica presa à linha (balão com seta, não faixa âmbar). «Entendi» e ela some para sempre."
+  },
+  {
+    "tela": "J9-primeiro-dia",
+    "passo": 5,
+    "rotulo": "Primeiro app: dica na faixa",
+    "png": "telas/J9-primeiro-dia-05-primeiro-app-dica-na-faixa.png",
+    "dica": "5 · O primeiro app: a faixa aparece pela primeira vez com o glifo em azul e outra dica presa, só uma vez."
+  },
+  {
+    "tela": "J9-primeiro-dia",
+    "passo": 6,
+    "rotulo": "Semanas depois",
+    "png": "telas/J9-primeiro-dia-06-semanas-depois.png",
+    "dica": "6 · Semanas depois: dois times, quatro bots, «Bots» como lista. A barra da E4b, chegou aqui sem nenhuma tela de configuração."
+  }
+]

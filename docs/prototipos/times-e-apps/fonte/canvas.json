@@ -1,0 +1,216 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-07T23:10:00Z"
+  },
+  "title": "Nod · barra lateral e apps",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "E4b-faixa-um-clique.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "E4b · Times em mosaico, bots fora, faixa de um clique",
+      "is_interactive": true
+    },
+    "E5-dez-bots-cinco-apps.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "E5 · E4b com 10 bots e 5 apps",
+      "is_interactive": true
+    },
+    "J1-nascer-um-time.dc.html": {
+      "x": 0,
+      "y": 1500,
+      "w": 1440,
+      "h": 900,
+      "title": "J1 · Criar um time: arrastar, «+» ou pela fala",
+      "is_interactive": true
+    },
+    "J2-quadro-nasce-no-bot.dc.html": {
+      "x": 1520,
+      "y": 1500,
+      "w": 1440,
+      "h": 900,
+      "title": "J2 · Adicionar um bot ao quadro cria o time (interface ou fala)",
+      "is_interactive": true
+    },
+    "J3-um-app-novo.dc.html": {
+      "x": 3040,
+      "y": 1500,
+      "w": 1440,
+      "h": 900,
+      "title": "J3 · Um app novo no time, pela fala",
+      "is_interactive": true
+    },
+    "J4-entrar-e-sair.dc.html": {
+      "x": 0,
+      "y": 3000,
+      "w": 1440,
+      "h": 900,
+      "title": "J4 · Entrar e sair do time",
+      "is_interactive": true
+    },
+    "J5-pessoa-no-time.dc.html": {
+      "x": 1520,
+      "y": 3000,
+      "w": 1440,
+      "h": 900,
+      "title": "J5 · Uma pessoa no time",
+      "is_interactive": true
+    },
+    "J6-bot-em-dois-times.dc.html": {
+      "x": 3040,
+      "y": 3000,
+      "w": 1440,
+      "h": 900,
+      "title": "J6 · Um bot em dois times",
+      "is_interactive": true
+    },
+    "J7-enquanto-fora.dc.html": {
+      "x": 0,
+      "y": 4500,
+      "w": 1440,
+      "h": 900,
+      "title": "J7 · Enquanto você estava fora",
+      "is_interactive": true
+    },
+    "J8-arquivar-o-time.dc.html": {
+      "x": 1520,
+      "y": 4500,
+      "w": 1440,
+      "h": 900,
+      "title": "J8 · Arquivar o time (inverso da J2)",
+      "is_interactive": true
+    },
+    "J9-primeiro-dia.dc.html": {
+      "x": 3040,
+      "y": 4500,
+      "w": 1440,
+      "h": 900,
+      "title": "J9 · Primeiro dia: revelação progressiva",
+      "is_interactive": true
+    }
+  },
+  "order": [
+    "E4b-faixa-um-clique.dc.html",
+    "E5-dez-bots-cinco-apps.dc.html",
+    "J1-nascer-um-time.dc.html",
+    "J2-quadro-nasce-no-bot.dc.html",
+    "J3-um-app-novo.dc.html",
+    "J4-entrar-e-sair.dc.html",
+    "J5-pessoa-no-time.dc.html",
+    "J6-bot-em-dois-times.dc.html",
+    "J7-enquanto-fora.dc.html",
+    "J8-arquivar-o-time.dc.html",
+    "J9-primeiro-dia.dc.html"
+  ],
+  "notes": {
+    "titulo": {
+      "x": 0,
+      "y": -300,
+      "text": "Nod · times, apps e a barra lateral · direção escolhida (E4b) e seu limite (E5)",
+      "kind": "title1",
+      "maxW": 2960
+    },
+    "n0": {
+      "x": 3040,
+      "y": 0,
+      "w": 560,
+      "text": "Conceito fechado em 07/11:\n• Time = quem. Linha com mosaico dos membros, uma conversa em grupo por time. Um bot pode estar em vários times; bots não ficam aninhados.\n• App = o quê. Quadro é o primeiro; cada app tem um bot anfitrião que responde por ele. Apps não têm linha na barra: faixa de um clique no hover, «⋯», e pílula «conversa · <app> ▾».\n• Bot = conversa particular, lista própria.\n• Abrir um app recolhe a barra para o rail.",
+      "fill": "green"
+    },
+    "tituloJ": {
+      "x": 0,
+      "y": 1200,
+      "text": "Jornadas · como um time nasce, como um quadro de bot vira do time, como um app novo entra",
+      "kind": "title1",
+      "maxW": 4480
+    },
+    "nJ1": {
+      "x": 0,
+      "y": 2480,
+      "w": 560,
+      "text": "J1 · Três portas, nenhuma com formulário:\n• Arrastar um bot sobre outro (pastas do iPhone): anel azul no alvo + rótulo do resultado; solta e o time nasce, grupo abre, o bot chamador já fala.\n• «+» › Novo time: a grade vira seletor com ✓; «Criar time» e pronto.\n• Pela fala com o próprio bot: «chama o Xumbrega e o Gil pra trabalhar com você».\nSempre: nome provisório vem dos membros; renomeia na própria linha da barra; toast com «Dar nome · Desfazer».",
+      "fill": "blue"
+    },
+    "nJ2": {
+      "x": 1520,
+      "y": 2480,
+      "w": 560,
+      "text": "J2 · Não existe «criar time» a partir do quadro: adicionar alguém ao quadro É o ato.\n• Interface: «→ Ada» no cabeçalho da coluna abre quem cuida; ou arrastar o bot da barra para a coluna.\n• Fala: «coloca o Xumbrega cuidando de Implementando».\nResultado imediato, sem pergunta: time «Ada e Xumbrega» com 1 app; linha acima do quadro (ou da Ada) com «Dar nome · Levar para o Time Nod · Desfazer». O bot original é anfitrião do quadro; a pílula dele perde o modo quadro. «Levar para o Time Nod» só aparece se os dois já são membros de um mesmo time.",
+      "fill": "blue"
+    },
+    "nJ3": {
+      "x": 3040,
+      "y": 2480,
+      "w": 560,
+      "text": "J3 · App novo. Pela fala, no grupo, pedido a um bot (@Frida). Quem cria é anfitrião e entra no time se não estava. Também: «+ app» no menu da pílula (marketplace). O campo de baixo de um app fala com o anfitrião. Regra: app sem anfitrião não existe; se o anfitrião sai do time, o app pergunta quem assume.",
+      "fill": "blue"
+    },
+    "tituloJ2": {
+      "x": 0,
+      "y": 2700,
+      "text": "Jornadas · viver com o time: entrar e sair, pessoa, bot em dois times",
+      "kind": "title1",
+      "maxW": 4480
+    },
+    "tituloJ3": {
+      "x": 0,
+      "y": 4200,
+      "text": "Jornadas · voltar, encerrar, começar do zero",
+      "kind": "title1",
+      "maxW": 4480
+    },
+    "nJ4": {
+      "x": 4560,
+      "y": 3000,
+      "w": 520,
+      "text": "J4 · Sair pela fala ou por «⋯» › Membros › ×. Sair nunca apaga histórico. App sem anfitrião não existe: ao sair o anfitrião, o time pergunta quem assume, com padrão (quem chamou). Último bot sai: o time fica vazio e apagado, apps parados; o Nod sugere arquivar. Não se apaga sozinho.",
+      "fill": "blue"
+    },
+    "nJ5": {
+      "x": 4560,
+      "y": 3300,
+      "w": 520,
+      "text": "J5 · Pessoa entra pela mesma porta que um bot («+ membro», lista mistura os dois; e-mail para quem não tem Nod). Avatar de pessoa = inicial em círculo, nunca a forma dos bots. Vê grupo e apps inteiros; muda só o que pode fazer. Card com pessoa é azul «com Marina». «Ver como Marina» existe para quem administra.",
+      "fill": "blue"
+    },
+    "nJ6": {
+      "x": 4560,
+      "y": 3600,
+      "w": 520,
+      "text": "J6 · Um bot em N times: uma conversa particular só; nela ele separa por time (mosaico + nome) e aponta pendências. O particular não vaza para os grupos. Em cada grupo é só membro: fala quando chamado ou quando é anfitrião do app envolvido. Memória de um time não vaza para outro.",
+      "fill": "blue"
+    },
+    "nJ7": {
+      "x": 4560,
+      "y": 4500,
+      "w": 520,
+      "text": "J7 · Ao voltar: prévia em negrito; na faixa, o app com pendência em azul + contagem «com você». A bandeja «✉» soma times e bots: primeiro «Com você» por app, depois «Não lidos». No grupo, divisor de «você saiu às…» e resumo de 3 linhas da anfitriã. No quadro, coluna «Com você» com a ação no card. Tudo cai na hora ao resolver.",
+      "fill": "blue"
+    },
+    "nJ8": {
+      "x": 4560,
+      "y": 4800,
+      "w": 520,
+      "text": "J8 · Arquivar por «⋯» ou fala. Uma confirmação: o que fazer com cada app (volta ao anfitrião como quadro do bot = inverso da J2, ou arquiva junto). Linha some, toast com Desfazer, histórico pesquisável. Buscar encontra arquivados com «Restaurar» (o app volta ao time) e «Ver o histórico».",
+      "fill": "blue"
+    },
+    "nJ9": {
+      "x": 4560,
+      "y": 5100,
+      "w": 520,
+      "text": "J9 · Revelação progressiva (como a opção 9 de 02/11): conta nova vê só um bot e «outro bot». «Times» aparece com o primeiro time; a faixa com o primeiro app; «Bots» como lista quando passam de 4; bandeja quando há não lidos. Cada estreia tem uma dica presa ao elemento, uma vez só, com «Entendi». Nenhuma tela de configuração.",
+      "fill": "blue"
+    }
+  },
+  "designSystems": []
+}

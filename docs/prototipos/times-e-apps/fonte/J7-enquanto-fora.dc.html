@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>J7 · enquanto você estava fora</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:Inter,system-ui,sans-serif;color:#141414;background:#fff}
+.app{width:1440px;height:900px;display:flex;overflow:hidden;background:#fff;font-size:13px}
+.sb{width:340px;flex:none;background:#fafafa;border-right:1px solid #ececec;display:flex;flex-direction:column;padding:16px 12px;box-sizing:border-box}
+.sb-top{display:flex;align-items:center;justify-content:space-between;padding:0 8px 14px;font-weight:600}
+.icons{display:flex;gap:14px;color:#555;font-size:12px;font-weight:400}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding-bottom:14px;border-bottom:1px solid #ececec}
+.cell{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 10px;border-radius:12px;font-weight:500}
+.cell.on{background:#ededed}
+.av{width:44px;height:44px;border-radius:52% 48% 50% 50%/60% 60% 40% 40%;flex:none}
+.av.sm{width:36px;height:36px}
+.chip{font-size:10px;color:#555;background:#ececec;border-radius:5px;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:68px;font-weight:400}
+.dot{width:6px;height:6px;border-radius:50%;background:#c2b280;margin-top:2px}
+.sec{font-size:12px;color:#777;padding:18px 8px 8px}
+.row{display:flex;gap:12px;padding:10px 8px;border-radius:10px;align-items:flex-start}
+.row.on{background:#ededed}
+.t{flex:1;min-width:0}
+.name{font-weight:600;font-size:13px;display:flex;gap:6px;align-items:center;white-space:nowrap}
+.prev{color:#6b6b6b;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
+.foot{margin-top:auto;display:flex;gap:10px;align-items:center;padding:8px}
+.me{width:28px;height:28px;border-radius:50%;background:#e5e5e5;font-size:11px;display:flex;align-items:center;justify-content:center}
+.mk{flex:1;border:1px solid #e3e3e3;border-radius:12px;padding:9px;text-align:center;background:#fff;font-weight:500}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.pill{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center;padding:8px 18px;border-radius:999px;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.12);font-weight:600;font-size:13px}
+.head{padding:72px 24px 0;color:#777;font-size:12px;display:flex;gap:18px;align-items:center}
+.filters{padding:14px 24px 0;display:flex;gap:16px;font-size:12px;color:#555;align-items:center}
+.filters .on{font-weight:600;color:#141414;background:#ededed;padding:4px 10px;border-radius:8px}
+.cols{display:flex;gap:12px;padding:16px 24px;flex:1;overflow:hidden}
+.col{width:240px;flex:none;background:#f3f3f3;border-radius:12px;padding:10px;box-sizing:border-box}
+.colh{font-weight:600;font-size:13px;display:flex;gap:8px;align-items:center;padding:4px 6px 10px}
+.colh .n{color:#777;font-weight:400}
+.card{background:#fff;border-radius:10px;padding:10px 10px 14px;margin-bottom:8px;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.id{font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#888;margin-bottom:6px}
+.tags{display:flex;gap:6px;margin-top:8px;align-items:center;font-size:11px;color:#555}
+.tag{border:1px solid #ddd;border-radius:5px;padding:1px 6px}
+.empty{color:#999;text-align:center;padding:20px 0;font-size:12px}
+.bottom{position:absolute;left:0;right:0;bottom:24px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.sugs{display:flex;gap:8px}
+.sug{background:#f3f3f3;border-radius:999px;padding:7px 14px;font-size:12px}
+.input{width:640px;border:1px solid #e3e3e3;border-radius:14px;padding:12px 16px;color:#888;box-shadow:0 1px 4px rgba(0,0,0,.06);display:flex;justify-content:space-between;align-items:center;background:#fff;box-sizing:border-box}
+.send{width:30px;height:30px;border-radius:50%;background:#141414}
+button{font:inherit;border:0;background:none;color:inherit;cursor:pointer;text-align:left}
+.row{width:100%;box-sizing:border-box}
+.cell{cursor:pointer}
+.qav{width:36px;height:36px;border-radius:10px;background:#8a5a3c;flex:none;display:flex;flex-direction:column;justify-content:center;gap:4px;padding:0 9px;box-sizing:border-box}
+.qav i{display:block;height:3px;border-radius:2px;background:rgba(255,255,255,.85)}
+.qav i:nth-child(2){width:70%}.qav i:nth-child(3){width:45%}
+.qav.xs{width:18px;height:18px;border-radius:5px;gap:2px;padding:0 4px}
+.stack{display:inline-flex;margin-left:4px}.stack .av{width:16px;height:16px;border:1.5px solid #ededed;margin-left:-5px}
+.mode{padding:2px 4px;border-radius:6px;font-weight:600}
+.pill .link{color:#3b6fd1;font-weight:500;margin-left:6px}
+.chat{flex:1;overflow:hidden;padding:80px 120px 0;display:flex;flex-direction:column;gap:10px;font-size:13px}
+.who{color:#777;font-size:11px;display:flex;gap:8px;align-items:center}
+.bub{background:#f1f1f1;border-radius:14px;padding:10px 14px;max-width:620px;line-height:1.45}
+.bub.me{background:#6e4a35;color:#fff;align-self:flex-end}
+.sys{color:#888;font-size:11px;text-align:center;padding:4px 0}
+.hint{position:absolute;right:24px;top:18px;font-size:11px;color:#999;max-width:220px;text-align:right}
+.sb2{flex:none;position:relative;overflow:hidden;background:#fafafa;border-right:1px solid #ececec;transition:width .38s cubic-bezier(.2,.8,.2,1)}
+.full{position:absolute;left:0;top:0;width:340px;height:900px;display:flex;flex-direction:column;padding:16px 12px;box-sizing:border-box;transition:opacity .22s ease}
+.railc{position:absolute;left:0;top:0;width:72px;height:900px;display:flex;flex-direction:column;align-items:center;padding:16px 0;box-sizing:border-box;gap:6px;transition:opacity .22s ease .12s}
+.rc{width:56px;height:56px;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative}
+.rc.on{background:#ededed}
+.rc .av{width:40px;height:40px}
+.rc .b{position:absolute;right:6px;top:6px;width:8px;height:8px;border-radius:50%;background:#3b9ae1;border:1.5px solid #fafafa}
+.railc .me{margin-top:auto}
+.exp{color:#999;font-size:14px;margin-top:6px;padding:4px 10px}
+.cols{transition:padding .38s}
+.ev{display:flex;gap:8px;align-items:center;font-size:12px;color:#555;background:#fff;border:1px solid #e6e6e6;border-radius:10px;padding:6px 10px;align-self:flex-start}
+.ev .id{margin:0}
+.steps{position:absolute;left:24px;bottom:24px;display:flex;flex-direction:column;gap:4px;font-size:11px;color:#777;background:#fff;border:1px solid #e6e6e6;border-radius:10px;padding:8px 10px;z-index:2}
+.steps button{padding:3px 4px;border-radius:6px;color:#777}
+.steps button.on{background:#ededed;color:#141414;font-weight:600}
+.chip2{background:#fff;border:1px solid #d9d9d9;border-radius:999px;padding:7px 14px;font-size:12px;color:#141414}
+.bub.ada{background:#f1e8e2}
+.bub.xu{background:#efe9fb}
+.bub.gil{background:#fbf3df}
+.mos{width:36px;height:36px;flex:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;border-radius:10px;overflow:hidden}
+.mos span{display:block;border-radius:50% 50% 45% 45%/55% 55% 45% 45%}
+.mos.xs{width:20px;height:20px;gap:1px;border-radius:6px}
+.mos.lg{width:44px;height:44px}
+.hdr{display:flex;gap:12px;padding:10px 8px;border-radius:10px;align-items:center;width:100%;box-sizing:border-box}
+.hdr .name{font-size:13px}
+.sub{padding-left:22px;position:relative}
+.sub::before{content:"";position:absolute;left:12px;top:0;bottom:0;border-left:1px solid #e3e3e3}
+.badge{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;background:#141414;flex:none;margin-left:2px}
+.badge i{display:block;width:8px;height:1.5px;background:#fff;box-shadow:0 2.5px 0 #fff,0 -2.5px 0 #fff}
+.lbl{font-size:12px;color:#777;padding:18px 8px 8px}
+.tr{position:relative;padding:0}
+.tr-main{display:flex;gap:12px;padding:10px 8px;align-items:center;width:100%;box-sizing:border-box;border-radius:10px}
+.strip{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:2px;align-items:center;background:#fafafa;border:1px solid #e6e6e6;border-radius:999px;padding:3px;transition:opacity .15s}
+.tr:hover .strip{opacity:1 !important}
+.st{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.st:hover{background:#e6e6e6}
+.glyph{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:3px;flex:none}
+.glyph i{display:block;width:7px;height:1.4px;background:#fff;box-shadow:0 2.4px 0 #fff,0 -2.4px 0 #fff}
+.tr{position:relative;padding:0;display:block}
+.tr-main{display:flex;gap:12px;padding:10px 8px;align-items:center;width:100%;box-sizing:border-box;border-radius:10px}
+.strip{position:absolute;right:8px;top:12px;display:flex;gap:2px;align-items:center;background:#fafafa;border:1px solid #e6e6e6;border-radius:999px;padding:3px;transition:opacity .15s}
+.tr:hover .strip{opacity:1 !important}
+.st{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#141414}
+.st:hover{background:#e6e6e6}
+.st.more{font-size:14px;color:#666;letter-spacing:1px}
+.g{display:inline-flex}
+.panel{padding:2px 8px 10px 56px}
+.pl{font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.04em;margin:8px 0 5px}
+.apps{display:flex;flex-wrap:wrap;gap:4px}
+.ap{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:7px;font-size:11.5px;font-weight:500;border:1px solid #e6e6e6}
+.ap:hover{background:#ececec}
+.mbs{display:flex;flex-wrap:wrap;gap:3px}
+.mb{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.mb:hover{background:#e6e6e6}
+.menu{position:absolute;top:50px;left:50%;transform:translateX(-50%);background:#fff;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.14);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:200px;z-index:3}
+.mi{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:12.5px}
+.mi:hover{background:#f1f1f1}
+.mi small{margin-left:auto;color:#999;font-size:11px}
+.appscreen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#777;font-size:13px}
+.appscreen h2{margin:0;font-size:20px;color:#141414;font-weight:600}
+.nodchat .bub{background:#f1f1f1}
+.opt{display:flex;gap:8px;margin-top:4px}
+.optb{border:1px solid #d9d9d9;border-radius:10px;padding:8px 12px;font-size:12px;background:#fff}
+.optb:hover{background:#f1f1f1}
+.plusmenu{position:absolute;left:300px;top:44px;background:#fff;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.14);padding:6px;display:flex;flex-direction:column;min-width:170px;z-index:5}
+.steps{position:absolute;left:24px;bottom:24px;display:flex;flex-direction:column;gap:4px;font-size:11px;color:#777;background:#fff;border:1px solid #e6e6e6;border-radius:10px;padding:8px 10px;z-index:2}
+.steps button{padding:3px 4px;border-radius:6px;color:#777}
+.sysline{display:flex;gap:8px;align-items:center;justify-content:center}
+.ring{box-shadow:0 0 0 2px #3b6fd1, 0 0 0 6px rgba(59,111,209,.15);background:#eef3ff !important}
+.ghost{position:absolute;left:150px;top:118px;width:300px;opacity:.92;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18);border-radius:10px;transform:rotate(-2deg);z-index:6;pointer-events:none}
+.droplbl{position:absolute;left:28px;top:200px;background:#141414;color:#fff;font-size:11px;padding:5px 9px;border-radius:7px;z-index:7;pointer-events:none}
+.toast{position:absolute;left:50%;bottom:112px;transform:translateX(-50%);background:#141414;color:#fff;border-radius:12px;padding:10px 14px;font-size:12px;display:flex;gap:14px;align-items:center;z-index:4;box-shadow:0 6px 20px rgba(0,0,0,.2)}
+.toast button{color:#9ec1ff;font-weight:600}
+.toast .x{color:#aaa}
+.nameedit{display:inline-flex;align-items:center;gap:6px;border-bottom:1.5px solid #3b6fd1;padding:0 2px}
+.caret{display:inline-block;width:1.5px;height:14px;background:#3b6fd1}
+.pick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.pcell{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 10px;border-radius:12px;position:relative;font-weight:500}
+.pcell .ck{position:absolute;right:10px;top:8px;width:18px;height:18px;border-radius:50%;background:#3b6fd1;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center}
+.pcell.dim{opacity:.45}
+.selbar{display:flex;gap:8px;align-items:center;padding:10px 8px;border-top:1px solid #ececec;margin-top:8px;font-size:12px}
+.selbar .cta{margin-left:auto;background:#141414;color:#fff;border-radius:9px;padding:7px 12px;font-weight:600}
+.colown{display:inline-flex;align-items:center;gap:4px;color:#777;font-weight:400;font-size:12px;border-radius:6px;padding:1px 6px}
+.colown.open{background:#eef3ff;color:#3b6fd1}
+.picker{position:absolute;background:#fff;border-radius:12px;box-shadow:0 6px 22px rgba(0,0,0,.16);padding:6px;display:flex;flex-direction:column;z-index:5;min-width:200px}
+.picker .mi small{margin-left:auto;color:#999}
+.sysbar{display:flex;gap:10px;align-items:center;font-size:12px;color:#555;padding:8px 24px 0}
+.sysbar b{color:#141414}
+.sysbar button{color:#3b6fd1;font-weight:600}
+.sysbar .x{color:#999;font-weight:400}
+.dropcol{box-shadow:inset 0 0 0 2px #3b6fd1;background:#eef3ff !important}
+.person{border-radius:50%;background:#dfe5ea;color:#2f3b45;display:flex;align-items:center;justify-content:center;font-weight:600;flex:none;border:1.5px solid #c9d2da}
+.mrow{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;font-size:12.5px}
+.mrow:hover{background:#efefef}
+.mrow small{color:#999;margin-left:auto}
+.mrow .rm{color:#999;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.mrow .rm:hover{background:#e3e3e3;color:#141414}
+.tray{position:absolute;left:230px;top:44px;width:360px;background:#fff;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:8px;z-index:8}
+.tray .pl{margin:6px 8px 4px}
+.ti{display:flex;align-items:center;gap:10px;padding:8px;border-radius:9px;font-size:12.5px;width:100%;box-sizing:border-box}
+.ti:hover{background:#f1f1f1}
+.ti .t{min-width:0}
+.cnt{margin-left:auto;background:#3b6fd1;color:#fff;border-radius:999px;font-size:10.5px;padding:2px 7px;font-weight:600;flex:none}
+.cnt.g{background:#e3e3e3;color:#555}
+.divider{display:flex;align-items:center;gap:10px;color:#999;font-size:11px}
+.divider::before,.divider::after{content:"";flex:1;border-top:1px solid #e6e6e6}
+.card.you{box-shadow:inset 0 0 0 1.5px #3b6fd1}
+.tag.you{background:#eef3ff;color:#3b6fd1;border-color:#cfdcf8}
+.hintbox{background:#fff;border:1px solid #cfdcf8;border-radius:10px;padding:8px 10px;font-size:11.5px;color:#2f4a7a;margin:4px 8px 0;position:relative}
+.hintbox::before{content:"";position:absolute;left:24px;top:-6px;width:10px;height:10px;background:#fff;border-left:1px solid #cfdcf8;border-top:1px solid #cfdcf8;transform:rotate(45deg)}
+.hintbox b{color:#141414}
+.confirm{background:#fff;border:1px solid #e6e6e6;border-radius:12px;padding:12px 14px;font-size:12.5px;max-width:560px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.dimrow{opacity:.5}
+.srch{margin:0 8px 8px;border:1px solid #cfdcf8;border-radius:10px;padding:8px 12px;font-size:12.5px;background:#fff;display:flex;gap:8px;align-items:center}
+.results{margin:0 8px;font-size:12px}
+.bub.me{width:auto;height:auto;border-radius:14px;font-size:13px;display:block;max-width:620px}
+</style>
+</helmet>
+<div class="app">
+  <aside class="sb2" style="width:{{sbW}}">
+    <div class="full" style="opacity:{{fullOp}};pointer-events:{{fullPe}}">
+    <div class="sb-top"><span>◐ Nod</span><span class="icons"><span>⌕</span><button onClick="{{tray}}" aria-label="Não lidos">✉ {{trayN}}</button><span>▤ 17</span><span>+</span></span></div>    <sc-if value="{{trayOpen}}" hint-placeholder-val="{{ false }}"><div class="tray">
+      <div class="pl">Com você · 3</div>
+      <button class="ti" onClick="{{goQuadro}}"><div class="mos xs"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#f0c050"></span><span style="background:#e9e9e9"></span></div><div class="t"><div class="name" style="font-size:12.5px">Produto Nod · Quadro</div><div class="prev">ADA-20 e ADA-31 esperam sua decisão</div></div><span class="cnt">2</span></button>
+      <button class="ti"><div class="mos xs"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#ec4899"></span><span style="background:#f0b030"></span></div><div class="t"><div class="name" style="font-size:12.5px">Leapy · Aprovações</div><div class="prev">MIL-3 · aprovação da coluna</div></div><span class="cnt">1</span></button>
+      <div class="pl">Não lidos · 4</div>
+      <button class="ti" onClick="{{goTime}}"><div class="mos xs"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#f0c050"></span><span style="background:#e9e9e9"></span></div><div class="t"><div class="name" style="font-size:12.5px">Produto Nod</div><div class="prev">Ada: enquanto você estava fora: 3 feitas, 2 com você</div></div><span class="cnt g">3</span></button>
+      <button class="ti"><div class="av" style="width:20px;height:20px;background:#ec4899;"></div><div class="t"><div class="name" style="font-size:12.5px">Frida</div><div class="prev">As 4 DMs saíram. A Ingrid voltou com 9…</div></div><span class="cnt g">1</span></button>
+    </div></sc-if>    <div class="grid">
+      <button class="cell" style="background:{{adaBg}}" onClick="{{goAda}}"><div class="av" style="width:44px;height:44px;background:#8a5a3c;"></div>Ada<div class="dot"></div></button>
+      <div class="cell"><div class="av" style="width:44px;height:44px;background:#3b9ae1;"></div>Milton</div>
+      <div class="cell"><div class="av" style="width:44px;height:44px;background:#f0c050;"></div>Gil</div>
+      <div class="cell"><div class="av" style="width:44px;height:44px;background:#8b5cf6;"></div>Doze</div>
+    </div>
+    <div class="lbl">Times</div>
+<div class="hdr tr" style="background:{{timeBg}}"><button class="tr-main" onClick="{{goTime}}"><div class="mos"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#f0c050"></span><span style="background:#e9e9e9"></span></div><div class="t"><div class="name">Produto Nod <span style="color:#999;font-weight:400">· 3 · 1 app</span></div><div class="prev"><b style="color:#141414">Ada: enquanto você estava fora: 3 feitas, 2 com você</b></div></div></button><div class="strip" style="opacity:1"><button class="st" onClick="{{goQuadro}}" aria-label="Quadro · 2 com você" title="Quadro · 2 com você"><span class="g" style="color:#3b6fd1"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="2" width="2.6" height="8" rx=".6" fill="currentColor"/><rect x="4.7" y="2" width="2.6" height="5.5" rx=".6" fill="currentColor"/><rect x="8.4" y="2" width="2.6" height="3.5" rx=".6" fill="currentColor"/></svg></span></button><span class="cnt" style="margin:0 4px">{{youN}}</span><button class="st more" aria-label="Tudo do time">⋯</button></div></div>
+<div class="hdr tr" style="background:transparent"><button class="tr-main" onClick="{{noop}}"><div class="mos"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#ec4899"></span><span style="background:#f0b030"></span></div><div class="t"><div class="name">Leapy <span style="color:#999;font-weight:400">· 5 · 2 apps</span></div><div class="prev"><b style="color:#141414">Nina: @Ada não consigo mover a MIL-3</b></div></div></button><div class="strip" style="opacity:1"><button class="st" aria-label="Aprovações · 1" title="Aprovações · 1"><span class="g" style="color:#3b6fd1"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="4.5"/><path d="M4 6l1.5 1.5L8 4.5"/></svg></span></button><span class="cnt" style="margin:0 4px">1</span></div></div>
+    <div class="lbl">Bots</div>
+<div class="row" style=""><div class="av" style="width:36px;height:36px;background:#ec4899;"></div><div class="t"><div class="name">Frida <span class="chip">Acompanhamento diário…</span></div><div class="prev"><b style="color:#141414">As 4 DMs saíram. A Ingrid voltou com 9 …</b></div></div></div><div class="row" style=""><div class="av" style="width:36px;height:36px;background:#8b5cf6;"></div><div class="t"><div class="name">Xumbrega <span class="chip">Engenheiro de ponta…</span></div><div class="prev">The suite is running. I'll wait for the resul…</div></div></div>
+    <div class="foot"><div class="me">eu</div><div class="mk">Marketplace</div></div>
+    </div>
+    <div class="railc" style="opacity:{{railOp}};pointer-events:{{railPe}}">
+      <div style="font-weight:600;padding-bottom:8px">◐</div>
+      <button class="rc" style="background:{{adaBg}}" onClick="{{goAda}}" aria-label="Ada"><div class="av" style="width:40px;height:40px;background:#8a5a3c;"></div></button>
+      <div class="rc"><div class="av" style="width:40px;height:40px;background:#3b9ae1;"></div></div><div class="rc"><div class="av" style="width:40px;height:40px;background:#f0c050;"></div></div>
+      <div style="width:32px;border-top:1px solid #e3e3e3;margin:6px 0"></div>
+      <button class="rc" style="background:{{timeBg}}" onClick="{{goTime}}" aria-label="Time"><div class="mos"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#f0c050"></span><span style="background:#e9e9e9"></span></div></button>
+      <div class="rc"><div class="mos"><span style="background:#10b981"></span><span style="background:#8b5cf6"></span><span style="background:#ec4899"></span><span style="background:#f0b030"></span></div></div>
+      <button class="exp" onClick="{{goTime}}" aria-label="Abrir a barra">›</button>
+      <div class="me">eu</div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="pill"><div class="mos xs"><span style="background:#8a5a3c"></span><span style="background:#8b5cf6"></span><span style="background:#f0c050"></span><span style="background:#e9e9e9"></span></div>Produto Nod <span style="color:#ccc">│</span><button class="mode" style="color:{{convColor}}" onClick="{{goTime}}">conversa</button><button class="mode" style="color:{{quadroColor}};display:inline-flex;gap:6px;align-items:center" onClick="{{goQuadro}}"><span class="g"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="2" width="2.6" height="8" rx=".6" fill="currentColor"/><rect x="4.7" y="2" width="2.6" height="5.5" rx=".6" fill="currentColor"/><rect x="8.4" y="2" width="2.6" height="3.5" rx=".6" fill="currentColor"/></svg></span>Quadro ▾</button></div>
+    <div class="hint">{{hint}}</div>
+    <sc-if value="{{sChat}}" hint-placeholder-val="{{ true }}">
+      <div class="chat">
+        <div class="who"><div class="av" style="width:22px;height:22px;background:#8b5cf6;"></div>Xumbrega · ontem 18:20</div>
+        <div class="bub xu">ADA-14 passou. Pegando a ADA-15.</div>
+        <div class="divider">você saiu ontem às 18:40</div>
+        <div class="who"><div class="av" style="width:22px;height:22px;background:#8a5a3c;"></div>Ada · hoje 08:00</div>
+        <div class="bub ada"><b>Enquanto você estava fora</b><br>Feitas: ADA-14, ADA-15, ADA-16 (Xumbrega).<br>Com você: ADA-20 (aprovar o protótipo do Gil) e ADA-31 (decidir a validação do Windows).<br>Travada: nenhuma.</div>
+        <div class="opt"><button class="optb" onClick="{{goQuadro}}">Ver as 2 com você ↗</button><button class="optb">Resumo completo</button></div>
+      </div>
+      <div class="bottom"><div class="input"><span>Mensagem para o time · @ para chamar alguém</span><div class="send"></div></div></div>
+    </sc-if>
+    <sc-if value="{{sBoard}}" hint-placeholder-val="{{ false }}"><div class="head"><span>Produto Nod · 2 com você</span><span>Sem prazo ▾</span><span>15 de 242 feitas</span></div>
+      <div class="filters"><span class="on">Todas</span><span>Comigo 10</span><span>Ada 57</span><span>Xumbrega 30</span><span>Gil 3</span></div>
+      <div class="cols">
+      <div class="col"><div class="colh">◌ Backlog <span class="n">203</span></div>
+        <div class="card"><div class="id">ADA-31</div>ADA-11 Windows Fase 1: validação humana e ajustes do repo</div>
+        <div class="card"><div class="id">ADA-33</div>Cerca de credencial: aspas ANSI-C escapam do…<div class="tags"><span class="tag">Linear</span>Ada</div></div>
+        <div class="card"><div class="id">ADA-34</div>Bug (web): o Esc que fecha a tarefa zera o scrollLeft<div class="tags"><span class="tag">Linear</span>Ada</div></div>
+        <div class="card"><div class="id">ADA-35</div>Bug (web): o texto lido na tarefa desliza 20–85 px<div class="tags"><span class="tag">Linear</span>Ada</div></div>
+      </div>
+      <div class="col"><div class="colh">◑ Com você <span class="n">{{youN}}</span></div><sc-if value="{{c20}}" hint-placeholder-val="{{ true }}"><div class="card you"><div class="id">ADA-20</div>Protótipo do onboarding por voz<div class="tags"><span class="tag you">aprovar</span>Gil</div><div class="opt"><button class="optb" style="padding:5px 10px" onClick="{{approve}}">Aprovar</button><button class="optb" style="padding:5px 10px">Devolver</button></div></div></sc-if><div class="card you"><div class="id">ADA-31</div>Windows Fase 1: validação humana<div class="tags"><span class="tag you">decidir</span>Ada</div></div></div>
+      <div class="col"><div class="colh">◑ Detalhamento <span class="n">0</span></div><div class="empty">Nada aqui</div></div>
+      <div class="col"><div class="colh">◑ Prototipando <span class="n">0</span></div><div class="empty">Nada aqui</div></div>
+      <div class="col"><div class="colh">◑ Pronto para eng <span class="n">0</span></div><div class="empty">Nada aqui</div></div>
+      <div class="col"><div class="colh">◑ Plano de eng <span class="n">1</span></div><div class="card"><div class="id">ADA-247</div>Decisão já resolvida continua clicável na tela<div class="tags"><span class="tag">Linear</span>Xumbrega</div></div></div>
+    </div>
+    
+      <div class="bottom"><div class="sugs"><span class="sug">Responder ADA-2</span><span class="sug">Resumo do quadro</span><span class="sug">O que está parado?</span></div><div class="input"><span>{{boardPlaceholder}}</span><div class="send"></div></div></div></sc-if>
+    <div class="steps"><button style="background:{{b1}}" onClick="{{s1}}">1 · Barra ao voltar</button><button style="background:{{b2}}" onClick="{{s2}}">2 · Bandeja «✉»</button><button style="background:{{b3}}" onClick="{{s3}}">3 · Grupo: resumo da anfitriã</button><button style="background:{{b4}}" onClick="{{s4}}">4 · Quadro: as 2 com você</button><button style="background:{{b5}}" onClick="{{s5}}">5 · Aprovou uma: contagem cai</button><button style="color:#3b6fd1" onClick="{{s1}}">↺ recomeçar</button></div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state={st:1}; }
+  _common(board,inTime,st,bgs){ const bg=(k)=>st===k?'#ededed':'transparent'; const o={ sbW:board?'72px':'340px', fullOp:board?0:1, fullPe:board?'none':'auto', railOp:board?1:0, railPe:board?'auto':'none', timeBg:inTime?'#ededed':'transparent', adaBg:inTime?'transparent':'#ededed', stripOp:inTime?1:0, convColor:board?'#999':'#141414', quadroColor:board?'#141414':'#999', boardPlaceholder:'Nova tarefa ou mensagem para o time', noop:()=>{}, tray:()=>{}, trayN:'' }; for(let i=1;i<=bgs;i++){o['b'+i]=bg(i);} return o; }
+  renderVals(){
+    const st=this.state.st; const set=(n)=>()=>this.setState({st:n}); const board=st>=4;
+    const youN=st===5?1:2;
+    const hints={1:'1 · Ao voltar: prévias em negrito nos times e bots com novidade; na faixa de cada time, o app com pendência em azul e a contagem «com você». Nada de faixa âmbar.',
+      2:'2 · A bandeja «✉» (a de hoje) soma times e bots: primeiro «Com você» por app, depois «Não lidos». Cada item leva direto ao lugar.',
+      3:'3 · No grupo, um divisor marca quando você saiu, e a anfitriã abre com um resumo de três linhas: feitas, com você, travadas. Resumo é dela, não do sistema.',
+      4:'4 · No quadro, a coluna «Com você» concentra as duas: cada card diz o que espera (aprovar, decidir) e tem a ação no próprio card.',
+      5:'5 · Aprovou a ADA-20: a contagem cai na coluna, na faixa da barra e na bandeja, na hora.'};
+    return Object.assign(this._common(board,true,st,5),{
+      sChat:!board, sBoard:board, trayOpen:st===2, trayN:st===5?'6':'7', youN, c20:st!==5,
+      tray:()=>this.setState({st:this.state.st===2?1:2}), approve:set(5),
+      goTime:set(3), goQuadro:set(4), goAda:()=>{},
+      s1:set(1), s2:set(2), s3:set(3), s4:set(4), s5:set(5), hint:hints[st]
+    });
+  }
+}
+</script>
+</body>
+</html>
