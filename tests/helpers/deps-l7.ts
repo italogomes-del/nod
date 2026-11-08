@@ -21,6 +21,7 @@ import { ajustarBarraLateral } from "../../src/use-cases/ajustar-barra-lateral.t
 import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
 import { gerirApps } from "../../src/use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
+import { gerirMaquinas } from "../../src/use-cases/gerir-maquinas.ts";
 import { gerirCanvas } from "../../src/use-cases/gerir-canvas.ts";
 import { gerirAcessos } from "../../src/use-cases/gerir-acessos.ts";
 import { naoLidosNoChat } from "../../src/use-cases/nao-lidos-no-chat.ts";
@@ -117,6 +118,7 @@ export function useCasesFalsos(): UseCasesNod {
     gerirApps,
     naoLidosNoChat,
     gerirTimes,
+    gerirMaquinas,
     gerirCanvas,
     gerirAcessos,
     buscarConversas,

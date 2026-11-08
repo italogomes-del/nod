@@ -51,7 +51,7 @@ import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPER
 import { criarPreparoNoMotor } from "./preparo-do-login.ts";
 import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
 import { comandoDeParear, comandoDeReinstalar, comandoParaAbrir, conferirGitForWindows, MENSAGEM_SEM_GIT_FOR_WINDOWS, plataformaDoMotor, SAIDA_SEM_GIT_FOR_WINDOWS, servidorAceitaPlataforma } from "./windows.ts";
-import { AJUDA, aposentarChaveAntiga, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
+import { AJUDA, aposentarChaveAntiga, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, guardarMaquinaDoMotor, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
  * O motor do Nod sem janela (ADR-090): o mesmo laço do app do Mac (`desktop/main.ts`, `conectar()`) numa máquina Linux
@@ -134,6 +134,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     log("aviso", "servidor_sem_windows", {});
     throw new FalhaPonte("servidor_fora");
   }
+  await guardarMaquinaDoMotor(pasta, { id: dados.machineId, conexao: c }); // ADA-243: o "este computador" do app do Windows
   // NOD-94 (emenda 11 da ADR-090): a máquina só-computador hospeda o computador do bot e nunca pega turno — sem laço e
   // sem itens do gh. Servidor antigo (sem papel) = motor. O servidor também recusa o puxar dela (segunda camada).
   const papel = PAPEIS_MAQUINA.find((p) => p === dados.papel) ?? "motor";

@@ -66,8 +66,10 @@ describe("fila da conversa com a máquina do bot fora do ar (ADR-090, protótipo
     const e = com("vm", [maquina("vm", "vm-sp", false), maquina("mac", "MacBook", true)]);
     const s = situacaoNaFila(mensagem("m2"), e);
     expect(s).toMatchObject({ tipo: "na_fila", turnoId: "t2", destaVez: { conversaId: C, maquinaId: "mac", nome: "MacBook" } });
-    expect(s && s.tipo === "na_fila" ? s.texto : "").toMatch(/^Na fila · vm-sp não responde desde \d\d:\d\d$/);
+    // ADA-243 (spec da jornada B): o bot diz onde trabalha e o que a pessoa pode fazer, com o link.
+    expect(s && s.tipo === "na_fila" ? s.texto : "").toBe("Eu trabalho no vm-sp, que está desligado; começo quando ele voltar, ou mude meu computador em");
     const html = renderMensagem(mensagem("m2"), e);
+    expect(html).toMatch(/data-act="secao-espaco"[^>]*data-secao="maquinas"[^>]*>Configurações › Computadores|data-secao="maquinas"[^>]*data-act="secao-espaco"/);
     expect(html).toContain('data-act="rodar-desta-vez"');
     expect(html).toContain("Rodar em MacBook desta vez");
     expect(html).toContain('data-act="cancelar-turno"');
@@ -84,6 +86,13 @@ describe("fila da conversa com a máquina do bot fora do ar (ADR-090, protótipo
   it("máquina do bot conectada mas sem IA pronta: a linha diz o que falta", () => {
     const e = com("vm", [{ ...maquina("vm", "vm-sp", true), ias: { "claude-cli": "nao_autenticado" as const } }]);
     expect(situacaoNaFila(mensagem("m2"), e)).toMatchObject({ texto: expect.stringContaining("vm-sp está sem IA pronta") });
+  });
+
+  it("ADA-243: sem IA NESTE computador, a linha diz neste computador (não pede o terminal de outra máquina)", () => {
+    const e = { ...com("vm", [{ ...maquina("vm", "Windows de Marlon", true), ias: { "claude-cli": "ausente" as const } }]), estaMaquina: { id: "vm", nome: "Windows de Marlon", plataforma: "win32" as const } };
+    const s = situacaoNaFila(mensagem("m2"), e);
+    expect(s && s.tipo === "na_fila" ? s.texto : "").toMatch(/^Na fila · sem IA neste computador/);
+    expect(s && s.tipo === "na_fila" ? s.texto : "").not.toContain("nod-motor");
   });
 
   it("máquina do bot conectada: a fila de sempre", () => {

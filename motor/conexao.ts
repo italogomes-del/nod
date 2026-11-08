@@ -1,4 +1,5 @@
 import { conviteValido } from "../src/shared/convite.ts";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pastasDoMotor } from "../src/adapters/executor/plataforma.ts";
@@ -53,6 +54,46 @@ export async function guardarConexao(pasta: string, c: ConexaoMotor): Promise<vo
   const tmp = `${destino}.${process.pid}.tmp`;
   await writeFile(tmp, `${JSON.stringify(c)}\n`, { mode: 0o600 });
   await rename(tmp, destino);
+}
+
+/**
+ * ADA-243 (definido em 2026-11-07): o id da chave desta máquina, que o servidor devolve na sessão. O motor grava a cada
+ * conexão para o app do Windows (outro processo) responder "este computador" à web. `url` e `marca` (um resumo da chave,
+ * nunca a chave) amarram à conexão: pareou em outro servidor OU trocou de chave no mesmo (o Google no app troca a
+ * provisória pela da conta; revisão do PR #692), o arquivo velho não vale até o motor reconectar e regravar.
+ */
+export const arquivoDaMaquina = (pasta: string) => join(pasta, "maquina.json");
+export type MaquinaDoMotor = { id: string; url: string };
+export const marcaDaChave = (chave: string): string => createHash("sha256").update(chave).digest("hex").slice(0, 16);
+
+export function lerMaquinaDoMotor(texto: string, conexao: ConexaoMotor | null): MaquinaDoMotor | null {
+  try {
+    const v = JSON.parse(texto) as Partial<MaquinaDoMotor> & { marca?: unknown };
+    if (typeof v.id !== "string" || !v.id || typeof v.url !== "string" || typeof v.marca !== "string") return null;
+    return conexao && conexao.url === v.url && marcaDaChave(conexao.chave) === v.marca ? { id: v.id, url: v.url } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function carregarMaquinaDoMotor(pasta: string): Promise<MaquinaDoMotor | null> {
+  try {
+    return lerMaquinaDoMotor(await readFile(arquivoDaMaquina(pasta), "utf8"), await carregarConexao(pasta));
+  } catch {
+    return null;
+  }
+}
+
+/** Melhor esforço: sem gravar, a web só não sabe qual é este computador (cai no "não sei", nunca num erro). */
+export async function guardarMaquinaDoMotor(pasta: string, m: { id: string; conexao: ConexaoMotor }): Promise<void> {
+  try {
+    const destino = arquivoDaMaquina(pasta);
+    const tmp = `${destino}.${process.pid}.tmp`;
+    await writeFile(tmp, `${JSON.stringify({ id: m.id, url: m.conexao.url, marca: marcaDaChave(m.conexao.chave) })}\n`, { mode: 0o600 });
+    await rename(tmp, destino);
+  } catch {
+    /* a ponte devolve null */
+  }
 }
 
 /**

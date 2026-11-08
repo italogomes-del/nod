@@ -1,6 +1,7 @@
 import type { ContaNaTela, ContasNaTela } from "../../src/contracts/desktop.ts";
 import { esc, hora } from "../lib/render.ts";
 import { PROVEDOR, type IaMac, type UiIas } from "./cartao-ia.ts";
+import { nesteMac } from "../lib/plataforma-da-tela.ts";
 
 /**
  * As contas de uma IA em Provedores de IA (definido em 2026-10-12, ADR-101, NOD-211; protótipo v3). Embaixo do cartão
@@ -25,7 +26,7 @@ export function renderContasDaIa(ia: IaMac, ui: UiIas, agora: number, conectada:
     : c.adicionando
     ? `<div class="contas-login" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Entrando na conta nova${c.adicionando.apelido ? ` (${esc(c.adicionando.apelido)})` : ""}. Termine no navegador; as outras contas continuam conectadas.</span><button type="button" class="bt sm" data-act="ia-cancelar" data-ia="${ia}">Cancelar</button></div>`
     : form !== undefined
-      ? `<form class="contas-nova" data-form="conta-nova" data-ia="${ia}"><b>Nova conta do ${esc(cli)}</b><label>Apelido (opcional, fica só neste Mac)<input name="apelido" maxlength="40" placeholder="ex.: Leapy, Pessoal" value="${esc(form)}" data-conta-apelido="${ia}"></label><p class="mudo sm">Você entra no navegador, como na primeira conta.</p><div class="contas-acoes"><button type="submit" class="bt pri sm">Entrar</button><button type="button" class="bt sm" data-act="conta-form-fechar" data-ia="${ia}">Cancelar</button></div></form>`
+      ? `<form class="contas-nova" data-form="conta-nova" data-ia="${ia}"><b>Nova conta do ${esc(cli)}</b><label>Apelido (opcional, fica só ${nesteMac()})<input name="apelido" maxlength="40" placeholder="ex.: Leapy, Pessoal" value="${esc(form)}" data-conta-apelido="${ia}"></label><p class="mudo sm">Você entra no navegador, como na primeira conta.</p><div class="contas-acoes"><button type="submit" class="bt pri sm">Entrar</button><button type="button" class="bt sm" data-act="conta-form-fechar" data-ia="${ia}">Cancelar</button></div></form>`
       : c.contas.length < c.max
         ? `<button type="button" class="bt sm" data-act="conta-form-abrir" data-ia="${ia}">+ Adicionar outra conta</button>`
         : `<p class="mudo sm">Máximo de ${c.max} contas.</p>`;
@@ -40,7 +41,7 @@ export function renderContasDaIa(ia: IaMac, ui: UiIas, agora: number, conectada:
       <ol class="contas-lista" aria-label="Contas do ${esc(cli)}, em ordem de uso">${linhas}</ol>
       <div class="contas-rodape">${adicionar}</div>
       ${modo}
-      <p class="contas-privado">Apelido e plano ficam só neste Mac. O servidor do nod não os recebe; na conversa aparece só "conta 1", "conta 2".</p>
+      <p class="contas-privado">Apelido e plano ficam só ${nesteMac()}. O servidor do nod não os recebe; na conversa aparece só "conta 1", "conta 2".</p>
     </div>`;
 }
 

@@ -35,9 +35,25 @@ opção de pular, e conectar a IA "mais mágico".
    estiver nela é lido como `entrevista` (sem UPDATE). Duas perguntas (nome e objetivo) e "Pular as perguntas", que
    conclui (`onboarding_etapa = 'concluido'`).
 
+## Computador novo (jornada B, ADA-243, definido em 2026-11-08)
+
+1. **"Já vi" por máquina vale também para quem já concluiu.** Conta existente num computador sem o "já vi" local vê
+   "Oi de novo · este computador" com o estado da IA DESTA máquina; a conversa com o Nod não recomeça.
+2. **Esta máquina na web.** A ponte `nodDesktop.estaMaquina()` devolve a chave pareada desta instalação (Mac: o
+   `machineId` da sessão; Windows: o `maquina.json` que o motor grava ao conectar). Sem a ponte (web pura, app antigo),
+   a web diz "não sei" e nunca chuta a máquina pelo nome.
+3. **Tela B "Onde os bots trabalham".** Com a IA pronta aqui e a padrão nula, outra ou desligada. "Trabalhar neste
+   computador" usa o mesmo `PUT /maquinas/padrao` do seletor; "Manter" não cria estado (só o "já vi").
+4. **Aviso por máquina, sem flag (bug).** A barra, o topo do bot e a fila olham a máquina do bot (a dele, senão a
+   padrão) e, para "qualquer uma", esta máquina: "Sem IA neste computador", "Trabalha no {nome}, que está desligado".
+   O motivo de IA ausente no Windows/Linux nomeia a máquina, em vez de "neste Mac".
+5. **`maquinas.definir_padrao` vivo no chat** (`gerir_maquinas`, risco `muda`, sem cartão), o mesmo executor da tela;
+   revisa o NOD-396 só para essa ação. "Aqui" sem máquina conhecida faz o bot listar e perguntar.
+
 ## Consequências
 
-- Nenhuma ação nova no chat: `conta.entrar` (`nunca`) cobre código e Google no app (ADR-135).
+- Nenhuma ação nova no chat: `conta.entrar` (`nunca`) cobre código e Google no app (ADR-135). A jornada B sobe
+  `maquinas.definir_padrao` de `falta` para `vivo` (§ Computador novo).
 - A prova real no Windows depende da VM de QA (ADA-233/235); até lá valem os testes por plataforma e o roteiro de
   `docs/aceite-desktop.md`.
 

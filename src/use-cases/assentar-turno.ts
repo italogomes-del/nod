@@ -17,7 +17,7 @@ import { iaDaNegacao } from "../domain/harness.ts";
 import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
 import { ehMotivoDaQueda, ultimoSinalDoTurno, type MotivoDaQueda } from "../domain/incidente.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX, pastaDoBot } from "../domain/nativas.ts";
-import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { motivoDependeDaMaquina, motivoNaMaquina, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, prazoDoLimiteDaConta, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
@@ -519,6 +519,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     if (trocou && transitorio) events.push(...trocou);
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
+    // ADA-243: IA ausente no Windows/Linux nomeia a máquina, em vez de "neste Mac".
+    const maquinaDoTurno = motivoDependeDaMaquina(motivo) ? await deps.repos.maquinaTokens.identificar(entrega.machineId).catch(() => null) : null;
     // NOD-174: falha do fornecedor com classe conhecida ganha a frase com ação ("sua conta do Claude Code saiu deste
     // Mac…"); o motivo gravado continua o do protocolo (ADR-009). O cru fica só no diagnóstico (ADR-041).
     // NOD-171: o limite do plano veio do protocolo e diz quando volta; a frase leva a hora.
@@ -542,7 +544,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       // Com o payload do limite, o assunto é o dele.
       assunto: assuntoDaInterrupcao(motivo),
       // ADR-101: a frase das contas já é uma frase inteira ("Conta 1 do Claude Code no limite até 14:00. Seguir com a conta 2?").
-      texto: contas && entrega.harness && fraseFornecedor ? fraseFornecedor : redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoEmPortugues(motivo) }),
+      texto: contas && entrega.harness && fraseFornecedor ? fraseFornecedor : redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoNaMaquina(motivo, maquinaDoTurno) }),
       ...(limite ? { payload: { kind: "limite_do_plano" as const, harness: entrega.harness ?? null, voltaEm: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm && resultado.limiteVoltaEm > agora ? resultado.limiteVoltaEm : null, ...(contas ? { conta: contas } : {}) } } : {}),
       confianca: "confiavel",
     });

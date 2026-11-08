@@ -1,4 +1,5 @@
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
+import type { EstaMaquina } from "../../src/contracts/desktop-esta-maquina.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConectarMaquina, Estado } from "../estado/reducer.ts";
 import { rotuloDoMac } from "../lib/aparelho.ts";
@@ -45,9 +46,55 @@ export const COMANDO_DESLIGAR_COMPUTADOR = "sudo systemctl disable --now nod-mot
  * A máquina de um bot: a dele, senão o padrão da pessoa; null = qualquer uma (com o servidor no Mac, ADR-092: este Mac).
  * Só conta chave que ainda existe.
  */
-export function maquinaDoBot(estado: Estado, bot: Pick<Agente, "maquinaId">): MaquinaDto | null {
+export function maquinaDoBot(estado: Pick<Estado, "maquinas">, bot: Pick<Agente, "maquinaId">): MaquinaDto | null {
   const lista = maquinasDeTrabalho(estado.maquinas?.maquinas ?? []);
   return lista.find((m) => m.id === bot.maquinaId) ?? lista.find((m) => m.id === estado.maquinas?.padraoId) ?? null;
+}
+
+/**
+ * ADA-243: o resultado da ponte `estaMaquina`, conferido (a página não confia no formato). Espelha `estaMaquinaDe` de
+ * src/domain/esta-maquina.ts (a web não importa o domínio como valor, ADR-018).
+ */
+export function lerEstaMaquina(v: unknown): EstaMaquina | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.id !== "string" || typeof o.nome !== "string" || typeof o.plataforma !== "string") return null;
+  const id = o.id.trim();
+  if (!id) return null;
+  const plataforma = o.plataforma === "win32" || o.plataforma === "linux" ? o.plataforma : "darwin";
+  return { id, nome: o.nome.trim().slice(0, 120) || "este computador", plataforma };
+}
+
+/**
+ * ADA-243 (definido em 2026-11-07): a IA do bot agora, POR MÁQUINA (antes a barra olhava a máquina que respondeu primeiro e
+ * dizia "Disponível" com o Windows novo sem IA). O bot com máquina (a dele ou a padrão) olha ESSA; o "qualquer uma" olha
+ * esta máquina (a da ponte). Sem saber qual é esta máquina (web pura) e sem padrão, não há aviso: null.
+ */
+export type IaDoBotAgora =
+  | { tipo: "pronta" }
+  | { tipo: "sem_ia_aqui" }
+  | { tipo: "maquina_desligada"; nome: string }
+  | { tipo: "sem_ia_na_maquina"; nome: string };
+
+export function iaDoBotAgora(estado: Pick<Estado, "maquinas" | "estaMaquina">, bot: Pick<Agente, "maquinaId">): IaDoBotAgora | null {
+  const pronta = (m: MaquinaDto): boolean => Object.values(m.ias).includes("pronto");
+  const doBot = maquinaDoBot(estado, bot);
+  if (doBot) {
+    if (!doBot.conectada) return { tipo: "maquina_desligada", nome: doBot.nome };
+    if (pronta(doBot)) return { tipo: "pronta" };
+    return doBot.id === estado.estaMaquina?.id ? { tipo: "sem_ia_aqui" } : { tipo: "sem_ia_na_maquina", nome: doBot.nome };
+  }
+  const aqui = estado.estaMaquina ? (estado.maquinas?.maquinas ?? []).find((m) => m.id === estado.estaMaquina?.id) : undefined;
+  if (!aqui || !aqui.conectada) return null;
+  return pronta(aqui) ? { tipo: "pronta" } : { tipo: "sem_ia_aqui" };
+}
+
+/** A linha curta do cabeçalho do bot para cada caso (null = segue o rótulo de antes, "Disponível"). */
+export function presencaPorMaquina(ia: IaDoBotAgora | null): string | null {
+  if (!ia || ia.tipo === "pronta") return null;
+  if (ia.tipo === "sem_ia_aqui") return "Sem IA neste computador";
+  if (ia.tipo === "maquina_desligada") return `Trabalha no ${ia.nome}, que está desligado`;
+  return `Sem IA no ${ia.nome}`;
 }
 
 /** Os bots da pessoa (só a dona escolhe onde o bot trabalha), sem os excluídos. */
@@ -248,7 +295,10 @@ function dialogoDesconectar(estado: Estado): string {
   const n = (estado.contasIa?.contas ?? []).filter((c) => c.maquinas.some((v) => v.maquinaId === m.id && v.estado === "pronta")).length;
   const bots = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id).map((b) => b.nome);
   const pareceMac = m.plataforma === "darwin";
-  const volta = bots.length ? ` ${bots.join(", ")} ${bots.length === 1 ? "volta" : "voltam"} para ${estado.maquinas?.servidorNoMac ? "este Mac" : "outra máquina"} no próximo trabalho; o que está rodando agora termina lá.` : "";
+  // ADA-243: nomeia para onde vão (a padrão, quando há outra), em vez de "este Mac" no Windows.
+  const padrao = estado.maquinas?.maquinas.find((x) => x.id === estado.maquinas?.padraoId && x.id !== m.id && !soComputador(x));
+  const destino = padrao ? `o ${padrao.nome}` : estado.maquinas?.servidorNoMac ? "este computador" : "outra máquina";
+  const volta = bots.length ? ` ${bots.join(", ")} ${bots.length === 1 ? "volta" : "voltam"} para ${destino} no próximo trabalho; o que está rodando agora termina lá.` : "";
   const caixa = n > 0 ? `<label class="cl-caixa cl-check"><input type="checkbox" data-maq-sair-contas${q.sair ? " checked" : ""}><span>Sair também ${n === 1 ? "da conta" : `das ${n} contas`} de IA ${pareceMac ? "no" : "na"} ${esc(m.nome)}<small>Recomendado se a máquina vai ser apagada ou passar para outra pessoa. Nas outras máquinas as contas continuam.</small></span></label>` : "";
   const corpo = soComputador(m)
     ? `<p>A chave dela é cancelada e o computador dos seus bots volta para as máquinas de trabalho.</p><div class="ssh-manual"><p>O nod não guarda o acesso à ${esc(m.nome)}. Para tirar o computador de lá, rode no servidor:</p><div class="cx-cmd"><code>${esc(COMANDO_DESLIGAR_COMPUTADOR)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: COMANDO_DESLIGAR_COMPUTADOR } })}</div></div>`

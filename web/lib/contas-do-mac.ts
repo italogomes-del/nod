@@ -1,5 +1,6 @@
 import type { ContasNaTela, IaDesktop, NodDesktop } from "../../src/contracts/desktop.ts";
 import { PROVEDOR, type UiIas } from "../telas/cartao-ia.ts";
+import { nesteMac } from "./plataforma-da-tela.ts";
 
 /**
  * As várias contas de cada IA na página (definido em 2026-10-12, ADR-101, NOD-211; protótipo v3). Só dentro do app do
@@ -74,7 +75,7 @@ export function criarContasDoMac(d: DepsContasDoMac) {
     async remover(ia: IaDesktop, posicao: number): Promise<void> {
       const c = ponte();
       if (!c || d.ui().contas[ia]?.contas[posicao - 1]?.principal !== false) return;
-      if (!d.confirmar(`Remover a conta ${rotulo(ia, posicao)}?\n\nO nod sai só desta conta (logout) e apaga a pasta dela neste Mac. As outras contas continuam conectadas.`)) return;
+      if (!d.confirmar(`Remover a conta ${rotulo(ia, posicao)}?\n\nO nod sai só desta conta (logout) e apaga a pasta dela ${nesteMac()}. As outras contas continuam conectadas.`)) return;
       const r = await c.remover(ia, posicao).catch(() => null);
       if (!r) { d.mudar(comNota(ia, "Não deu para remover a conta. Tente de novo.")); return; }
       guardar(r.contas);

@@ -12,6 +12,7 @@ import { CARONA_TEXTO, ICONE_TROCA, caronaClicavel, explicacaoDaCarona, fraseDoD
 import { LOGOS_IA } from "./onboarding-logos.ts";
 import { estadoParaOBot, type UiIas } from "./cartao-ia.ts";
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
+import { desteMac, nesteMac, terminalDaqui } from "../lib/plataforma-da-tela.ts";
 
 /**
  * A conversa quando a conta da IA não serve (definido em 2026-10-05; protótipo "Nod — primeira sessão sem tropeços",
@@ -82,8 +83,8 @@ export const COMANDO_ATUALIZAR_IA: Record<IdIa, string> = {
 };
 
 const FRASE_DA_CAUSA:Record<CausaSemIa, (cli: string) => string> = {
-  conta_sem_acesso: (cli) => `a conta do ${cli} deste Mac está sem acesso (a organização dela desativou o uso por assinatura)`,
-  teste_falhou: (cli) => `a conta do ${cli} deste Mac entrou, mas não respondeu`,
+  conta_sem_acesso: (cli) => `a conta do ${cli} ${desteMac()} está sem acesso (a organização dela desativou o uso por assinatura)`,
+  teste_falhou: (cli) => `a conta do ${cli} ${desteMac()} entrou, mas não respondeu`,
 };
 
 /**
@@ -144,8 +145,8 @@ export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, 
     : inv.estado === "nao_autenticado" && inv.causa === "limite"
       ? [`${bot} não começou: a conta do ${nome} chegou ao limite da assinatura.`, `${bot} usa o ${nome} (${cli}), e a conta conectada está no limite de uso.`, ""]
     : inv.estado === "nao_autenticado"
-      ? [`${bot} não começou: falta entrar no ${cli}.`, `${bot} usa o ${nome} (${cli}). Ele está instalado neste Mac, mas sem conta conectada.`, p.noApp ? botao("ia-entrar", `${logo(p.ia)}Entrar no ${nome}`, { classe: "pri sm com-logo", dados }) : conectar]
-      : [`${bot} não começou: o ${cli} não está neste Mac.`, `${bot} usa o ${nome} (${cli}), que não foi encontrado neste Mac.`, p.noApp ? botao("ia-conectar", `${logo(p.ia)}Instalar o ${cli}`, { classe: "pri sm com-logo", dados }) : conectar];
+      ? [`${bot} não começou: falta entrar no ${cli}.`, `${bot} usa o ${nome} (${cli}). Ele está instalado ${nesteMac()}, mas sem conta conectada.`, p.noApp ? botao("ia-entrar", `${logo(p.ia)}Entrar no ${nome}`, { classe: "pri sm com-logo", dados }) : conectar]
+      : [`${bot} não começou: o ${cli} não está ${nesteMac()}.`, `${bot} usa o ${nome} (${cli}), que não foi encontrado ${nesteMac()}.`, p.noApp ? botao("ia-conectar", `${logo(p.ia)}Instalar o ${cli}`, { classe: "pri sm com-logo", dados }) : conectar];
   const trocar = p.agenteId ? botao("inteligencia", p.nomeDoBot ? `Trocar a IA de ${esc(p.nomeDoBot)}` : "Trocar a IA", { classe: "sm", id: p.agenteId }) : "";
   const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
   // O comando vai no próprio aviso: fora do app, a Conexão só mostra o da IA em uso, que pode não ser esta.
@@ -550,7 +551,7 @@ function quandoVolta(voltaEm: number, agora: number): string {
 /** NOD-171: o comando que atualiza a IA, com "Copiar"; no app do Mac, "Atualizar" abre a página oficial. */
 export function linhaAtualizarIa(ia: IdIa, noApp: boolean, comando: string = COMANDO_ATUALIZAR_IA[ia]): string {
   const abrir = noApp ? botao("ia-atualizar", `Atualizar o ${PROVEDOR_DA_IA[ia].cli}`, { classe: "pri sm", dados: { ia } }) : "";
-  return `<div class="ia-atualizar"><p>No Terminal deste Mac, rode:</p><div class="ia-comando"><code>${esc(comando)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: comando }, vivo: true })}</div><p class="mudo">O nod percebe sozinho quando a versão nova estiver instalada.</p>${abrir}</div>`;
+  return `<div class="ia-atualizar"><p>${terminalDaqui()}, rode:</p><div class="ia-comando"><code>${esc(comando)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: comando }, vivo: true })}</div><p class="mudo">O nod percebe sozinho quando a versão nova estiver instalada.</p>${abrir}</div>`;
 }
 
 /**
@@ -567,8 +568,8 @@ export function linhaIaTrocada(m: Mensagem, extra: { modelo?: string | null; rec
   const [motivo, detalhe] = p.causa === "limite"
     ? [`O ${de.nome} chegou ao limite`, `A assinatura do ${de.nome} chegou ao limite${p.renovaEm ? ` e renova ${quandoVolta(p.renovaEm, m.criadoEm)}` : ""}. Até lá, seus bots em automático usam ${comModelo}. Depois, voltam sozinhos para o ${de.nome}.`]
     : p.causa === "conta_sem_acesso"
-      ? [`A conta do ${de.nome} está sem acesso`, `A conta do ${de.nome} deste Mac entrou, mas não tem acesso ao ${de.cli} pela assinatura. Seus bots em automático usam ${comModelo} até ela voltar.`]
-      : [`O ${de.nome} não respondeu`, `O ${de.cli} deste Mac não respondeu. Seus bots em automático usam ${comModelo} até ele voltar.`];
+      ? [`A conta do ${de.nome} está sem acesso`, `A conta do ${de.nome} ${desteMac()} entrou, mas não tem acesso ao ${de.cli} pela assinatura. Seus bots em automático usam ${comModelo} até ela voltar.`]
+      : [`O ${de.nome} não respondeu`, `O ${de.cli} ${desteMac()} não respondeu. Seus bots em automático usam ${comModelo} até ele voltar.`];
   const ver = `<button type="button" class="linha-link" data-act="secao-espaco" data-secao="conexao">Ver em Provedores de IA</button>`;
   // NOD-312: a carona em texto (o summary já é o controle) e a frase a mais no detalhe, quando o turno recomeçou.
   const recomecou = extra.recomeco?.tipo === "carona";

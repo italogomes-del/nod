@@ -16,3 +16,7 @@ export const nesteMac = (): string => (plataformaDaTela() === "windows" ? "neste
 export const desteMac = (): string => (plataformaDaTela() === "windows" ? "deste computador" : "deste Mac");
 /** Onde a pessoa digita o comando da IA: o Terminal do Mac ou o PowerShell do Windows. */
 export const terminalDaqui = (): string => (plataformaDaTela() === "windows" ? "No PowerShell deste computador" : "No Terminal deste Mac");
+/** "no seu Mac" / "no seu computador" (Windows). ADA-243: os textos de fora do app e das notas. */
+export const noSeuMac = (): string => (plataformaDaTela() === "windows" ? "no seu computador" : "no seu Mac");
+/** "seu Mac" / "seu computador" (Windows). QA do ADA-243: "aguardando seu Mac", "do seu Mac". */
+export const seuMac = (): string => (plataformaDaTela() === "windows" ? "seu computador" : "seu Mac");

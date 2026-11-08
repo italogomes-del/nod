@@ -107,6 +107,7 @@ const ponte: NodDesktop = {
   },
   // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
   vmTentarAgora: () => ipcRenderer.invoke(CANAIS_DESKTOP.vmTentarAgora),
+  estaMaquina: () => ipcRenderer.invoke(CANAIS_DESKTOP.estaMaquina), // ADA-243
   aoAbrir: (fn: (alvo: AlvoAviso) => void) => {
     // Um ouvinte só (a página registra uma vez; recarregar recria o preload). O evento do IPC não vai à página.
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);

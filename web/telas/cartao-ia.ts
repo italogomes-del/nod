@@ -7,6 +7,7 @@ import { esc, hora } from "../lib/render.ts";
 import { ROTULO_COPIADO, VIVO } from "../lib/copiar.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
+import { nesteMac, noSeuMac, terminalDaqui } from "../lib/plataforma-da-tela.ts";
 
 /**
  * O cartão de uma IA (definido em 2026-10-10, plano "IAs: conexão, troca e escolha de modelo", PR 3; protótipos aprovados
@@ -227,7 +228,7 @@ export type ContextoCartao = {
   testandoNoOnboarding?: readonly IaMac[];
 };
 
-const ONDE = (ui: UiIas): string => (ui.noApp ? "neste Mac" : "no seu Mac");
+const ONDE = (ui: UiIas): string => (ui.noApp ? nesteMac() : noSeuMac());
 
 /** A ordem das IAs do Mac na lista da pessoa (as do servidor primeiro, na ordem dela; as que faltam no fim). */
 export function ordemDasIas(servidor: readonly IaDaPessoa[] | null | undefined): IaMac[] {
@@ -356,7 +357,7 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
  * NOD-9: fora do app, o caminho é o app do Mac — só isso. O comando do terminal aparece no app, recolhido em "Prefere o
  * terminal?", e só depois de uma falha (ADR-102, 2A); no navegador, o rodapé da NOD-171 já dá o comando com Copiar.
  */
-const NOTA_ATUALIZAR_FORA_DO_APP = "Para atualizar, abra o app do nod no seu Mac.";
+const NOTA_ATUALIZAR_FORA_DO_APP = `Para atualizar, abra o app do nod ${noSeuMac()}.`;
 
 /** Quanto tempo o "atualizado para a X." fica no cartão pronto depois do sucesso. */
 export const AVISO_SUCESSO_MS = 24 * 60 * 60 * 1000;
@@ -407,7 +408,7 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
     case "lenta":
       return vista(`O ${cli} demorou para responder · tentando de novo`, "mudo", { girando: true });
     case "nao_instalada":
-      return vista(`Não está ${onde}`, "mudo", noApp ? { botao: b("ia-instalar", "Instalar e entrar") } : { nota: c.ui.nota[ia] ?? `Para instalar, abra o app do nod no seu Mac.` });
+      return vista(`Não está ${onde}`, "mudo", noApp ? { botao: b("ia-instalar", "Instalar e entrar") } : { nota: c.ui.nota[ia] ?? `Para instalar, abra o app do nod ${noSeuMac()}.` });
     case "desatualizada": {
       // NOD-9: o "Atualizar" roda o atualizador do próprio CLI no Mac (com a reserva do instalador do nod); a frase da
       // última tentativa (ou da espera) vai no explica.
@@ -426,11 +427,11 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
     case "atualizando":
       return vista(fraseDaAtualizacao(e.atualizacao, cli) ?? `Atualizando o ${cli}…`, "mudo", { girando: e.atualizacao?.fase !== "pedindo_aprovacao", podeVerificar: false });
     case "sem_node":
-      return vista(`O ${cli} ${onde} precisa do Node.js`, "aviso", noApp ? { botao: b("ia-instalar", "Instalar") } : { nota: c.ui.nota[ia] ?? "Para instalar a versão do nod, abra o app do nod no seu Mac." });
+      return vista(`O ${cli} ${onde} precisa do Node.js`, "aviso", noApp ? { botao: b("ia-instalar", "Instalar") } : { nota: c.ui.nota[ia] ?? `Para instalar a versão do nod, abra o app do nod ${noSeuMac()}.` });
     case "config_invalida":
       return vista(`A configuração do ${cli} tem um erro`, "aviso", { explica: `O ${cli} ${onde} não abriu por causa de um erro no arquivo de configuração dele. Entrar de novo não resolve: corrija ou apague a linha com erro e verifique de novo.` });
     case "falta_entrar":
-      return vista(`${cli} instalado · falta entrar`, "mudo", noApp ? { botao: b("ia-entrar", "Entrar") } : { nota: c.ui.nota[ia] ?? "Para entrar, abra o app do nod no seu Mac." });
+      return vista(`${cli} instalado · falta entrar`, "mudo", noApp ? { botao: b("ia-entrar", "Entrar") } : { nota: c.ui.nota[ia] ?? `Para entrar, abra o app do nod ${noSeuMac()}.` });
     case "instalando":
       return vista("Instalando…", "mudo", { girando: true, podeVerificar: false });
     case "entrando":
@@ -628,7 +629,7 @@ export function abaixoDaIa(v: VistaIa, ui: UiIas): string {
   const explica = v.explica ? `<div class="ia-explica" role="status"><p>${esc(v.explica)}</p></div>` : "";
   const nota = v.nota ? `<p class="ia-aviso-nota" role="status">${esc(v.nota)}</p>` : "";
   const terminal = v.terminal
-    ? `<details class="ia-terminal"><summary class="cl-terminal-link">Prefere o terminal?</summary><p class="cl-terminal">No Terminal deste Mac: <code>${esc(v.terminal)}</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(v.terminal)}">Copiar</button></p></details>`
+    ? `<details class="ia-terminal"><summary class="cl-terminal-link">Prefere o terminal?</summary><p class="cl-terminal">${terminalDaqui()}: <code>${esc(v.terminal)}</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(v.terminal)}">Copiar</button></p></details>`
     : "";
   return fluxo + explica + nota + terminal;
 }

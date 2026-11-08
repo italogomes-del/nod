@@ -17,6 +17,7 @@ import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { listaDoLoteParaSuaVez } from "./card-lote.ts";
 import { ehCartaoCredencial, renderCardCredencial } from "./card-credencial.ts";
 import { ehCartaoDoRevisor, motivoDoCartao, perguntaDoCartao, renderCartaoRevisor, sempreNoCartao } from "./cartao-revisor.ts";
+import { noSeuMac, seuMac } from "../lib/plataforma-da-tela.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -111,7 +112,7 @@ const REGRA_HUMANA: Readonly<Record<string, string>> = {
  */
 function tagDesfecho(i: { selecionado: boolean; desfecho: string | null; destino: { execucao?: "maquina" } }, aberta: boolean): string {
   if (i.desfecho) return `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>`;
-  if (!aberta && i.selecionado && i.destino.execucao === "maquina") return '<span class="tag tag-ambar" title="Abra o app nod no seu Mac com o gh logado">aguardando seu Mac</span>';
+  if (!aberta && i.selecionado && i.destino.execucao === "maquina") return `<span class="tag tag-ambar" title="Abra o app nod ${noSeuMac()} com o gh logado">aguardando ${seuMac()}</span>`;
   return "";
 }
 
@@ -193,7 +194,7 @@ export function detalheAcesso(proposta: Proposta | null | undefined): string {
 function ondeAcontece(conectores: Estado["conectores"], slug: string): string {
   if (slug === "computador") return "no computador do bot";
   // ADR-055: o comando roda no terminal do Mac da própria pessoa, com as credenciais dela.
-  if (slug === "terminal") return "no terminal do seu Mac";
+  if (slug === "terminal") return `no terminal do ${seuMac()}`;
   return `no ${conectores.find((c) => c.slug === slug)?.nome ?? slug}`;
 }
 
@@ -249,7 +250,7 @@ function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
       : item.itensAprovacao.some((i) => i.destino.conector === "computador")
       ? "Ação no computador é aprovada uma a uma: ela está presa à tela que o bot observou."
       : item.itensAprovacao.some((i) => i.destino.conector === "terminal")
-        ? "Comando no seu Mac é aprovado um a um. Para não repetir nesta tarefa, use \"Pode fazer e o resto desta tarefa\"."
+        ? `Comando ${noSeuMac()} é aprovado um a um. Para não repetir nesta tarefa, use "Pode fazer e o resto desta tarefa".`
       : item.itensAprovacao.some((i) => nunca.has(i.id))
         ? "Aprovar ou fazer merge de PR sempre passa por você — não dá para permitir de uma vez."
         : "Dado pessoal sempre passa por você — não dá para permitir de uma vez.";

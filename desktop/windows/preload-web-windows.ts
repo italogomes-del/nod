@@ -7,7 +7,7 @@ import { CANAIS_DESKTOP, type IaDesktop, type NodDesktop } from "../../src/contr
  * teste das IAs) continua opcional no contrato e a web confere antes de chamar. O processo principal valida o remetente
  * e o argumento de novo (login-ia-windows.ts `daJanelaWeb`, ia-mac.ts `lerIaDesktop`).
  */
-const ponte: Pick<NodDesktop, "iaEntrar" | "iaInstalar" | "desafioConta" | "trocarConta" | "googleConta" | "esteComputador"> = {
+const ponte: Pick<NodDesktop, "iaEntrar" | "iaInstalar" | "desafioConta" | "trocarConta" | "googleConta" | "esteComputador" | "estaMaquina"> = {
   iaEntrar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaEntrar, ia),
   iaInstalar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaInstalar, ia),
   // ADA-242 (ADR-157): o Google para conta dentro do app, como no Mac (desafio do segredo de troca + loopback).
@@ -23,5 +23,6 @@ const ponte: Pick<NodDesktop, "iaEntrar" | "iaInstalar" | "desafioConta" | "troc
     jaViu: () => ipcRenderer.invoke(CANAIS_DESKTOP.esteComputadorJaViu),
     marcar: () => ipcRenderer.invoke(CANAIS_DESKTOP.esteComputadorMarcar),
   },
+  estaMaquina: () => ipcRenderer.invoke(CANAIS_DESKTOP.estaMaquina), // ADA-243: o motor gravou o id ao conectar
 };
 contextBridge.exposeInMainWorld("nodDesktop", ponte);

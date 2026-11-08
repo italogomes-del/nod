@@ -27,6 +27,7 @@ import { gerirApps } from "../../../src/use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../../src/use-cases/gerir-times.ts";
 import { gerirCanvas } from "../../../src/use-cases/gerir-canvas.ts";
 import { gerirAcessos } from "../../../src/use-cases/gerir-acessos.ts";
+import { gerirMaquinas } from "../../../src/use-cases/gerir-maquinas.ts";
 import { naoLidosNoChat } from "../../../src/use-cases/nao-lidos-no-chat.ts";
 import { buscarConversas, lerConversa } from "../../../src/use-cases/buscar-conversas.ts";
 
@@ -122,6 +123,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     gerirTimes,
     gerirCanvas,
     gerirAcessos,
+    gerirMaquinas,
     buscarConversas,
     lerConversa,
     abrirConta,

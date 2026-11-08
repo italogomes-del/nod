@@ -188,3 +188,24 @@ ligada e o Google configurado.
   há como pular.
 - [ ] **Flag desligada.** Com `NOD_ONBOARDING_TEXTO` desligada, o onboarding é o de antes (ligação, cadastro com senha,
   sem Google no app). Reprova se: algo da jornada A aparece.
+
+## K. Computador novo com conta existente (jornada B, ADA-243)
+
+Com `NOD_ONBOARDING_TEXTO=1` no servidor, uma conta que já concluiu o onboarding e cuja máquina padrão é um Mac
+**desligado**. Num Windows limpo (VM de QA, ADA-233):
+
+- [ ] **Oi de novo.** Instalar, entrar com o mesmo e-mail. Observar: o diálogo "Oi de novo, {nome}" com
+  "este computador · {nome do PC}" e o estado real da IA daqui (pronta / instalada sem login / nada). A conversa com o
+  Nod não recomeça. Reprova se: aparece "Mac", a conversa de boas-vindas volta, ou o estado é o do Mac.
+- [ ] **Tela B.** Entrar no Claude Code pelo botão; quando ficar pronto, "Continuar". Observar: "Hoje seus bots
+  trabalham no {Mac}, que está desligado." com **Manter no {Mac}** e **Trabalhar neste computador**. Escolher
+  **Trabalhar neste computador** e mandar uma mensagem a um bot: responde daqui. Em Configurações › Computadores, este PC
+  é a padrão (o mesmo seletor). Reprova se: a padrão não muda, ou o bot espera o Mac.
+- [ ] **Manter.** Repetir com outra VM e escolher **Manter**. Mandar mensagem a um bot: a fila diz "Eu trabalho no
+  {Mac}, que está desligado; começo quando ele voltar, ou mude meu computador em Configurações › Computadores" e o topo
+  do bot diz "Trabalha no {Mac}, que está desligado". Reprova se: aparece "Turno interrompido" ou some mensagem.
+- [ ] **Sem IA aqui.** Antes de entrar na IA, a barra e a fila dizem "Sem IA neste computador", nunca "Disponível".
+- [ ] **Uma vez por máquina.** Fechar e reabrir: o diálogo não volta. Desinstalar apagando `%APPDATA%\nod-motor` e
+  reinstalar: volta. Reprova se: aparece a cada abertura ou nunca mais depois da reinstalação limpa.
+- [ ] **Pelo chat.** Pedir a um bot "trabalha neste computador a partir de agora": ele pergunta qual máquina (lista pelo
+  nome) ou, com o nome, muda a padrão (`maquinas.definir_padrao`); a tela de computadores mostra o mesmo estado.

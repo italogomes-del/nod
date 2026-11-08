@@ -2,6 +2,7 @@ import type { IaDesktop, NodDesktop, TesteDeIa } from "../../src/contracts/deskt
 import type { EstadoIa } from "../../src/contracts/estado-ia.ts";
 import { COPIADO_MS } from "./copiar.ts";
 import { NOTA_CONTA_FORA_DO_APP, notaDaTroca, PROVEDOR, type TrocaDeConta, type UiIas } from "../telas/cartao-ia.ts";
+import { nesteMac, noSeuMac } from "./plataforma-da-tela.ts";
 
 /**
  * O que os cartões de IA fazem quando a pessoa clica (definido em 2026-10-10, plano das IAs, PR 3). Antes, "Entrar" e
@@ -38,7 +39,7 @@ export type DepsIasDoMac = {
 /** NOD-8: o que `instalar` e `entrar` devolvem: o login começou, ou o erro (o mesmo da nota do cartão). */
 export type ResultadoNoMac = { ok: true } | { ok: false; erro: string };
 
-export const NOTA_FORA_DO_APP = { entrar: "Para entrar, abra o app do nod no seu Mac.", instalar: "Para instalar, abra o app do nod no seu Mac." } as const;
+export const NOTA_FORA_DO_APP = { entrar: `Para entrar, abra o app do nod ${noSeuMac()}.`, instalar: `Para instalar, abra o app do nod ${noSeuMac()}.` } as const;
 
 /** A frase do resultado de colar o código do Claude, quando ele não foi aceito. */
 export const NOTA_DO_CODIGO: Record<"codigo_invalido" | "sem_login_aberto" | "ja_enviado" | "nao_pede_codigo", string> = {
@@ -145,7 +146,7 @@ export function criarIasDoMac(d: DepsIasDoMac) {
     }
     if (mac?.iaInstalar) {
       const r = await mac.iaInstalar(ia).catch(() => ({ ok: false as const, motivo: "falhou" as const }));
-      return falhou(ia, r.ok ? `Abrimos a página do ${cli}. Instale e volte: o nod percebe sozinho quando ele aparecer neste Mac.` : `Não deu para abrir a página do ${cli}. Atualize o app do nod para instalar por aqui.`);
+      return falhou(ia, r.ok ? `Abrimos a página do ${cli}. Instale e volte: o nod percebe sozinho quando ele aparecer ${nesteMac()}.` : `Não deu para abrir a página do ${cli}. Atualize o app do nod para instalar por aqui.`);
     }
     return falhou(ia, NOTA_FORA_DO_APP.instalar);
   }
@@ -193,7 +194,7 @@ export function criarIasDoMac(d: DepsIasDoMac) {
     if (mac?.iaEntrar) {
       const r = await mac.iaEntrar(ia).catch(() => ({ ok: false as const, motivo: "falhou" as const }));
       if (r.ok) { d.mudar(comNota(ia, `Abrimos o navegador. Entre no ${nome} e volte: o nod percebe sozinho.`)); return { ok: true }; }
-      return falhou(ia, r.motivo === "nao_instalado" ? `O ${cli} não está neste Mac. Atualize o app do nod para instalar por aqui.` : `Não deu para abrir o login do ${nome}. Tente de novo.`);
+      return falhou(ia, r.motivo === "nao_instalado" ? `O ${cli} não está ${nesteMac()}. Atualize o app do nod para instalar por aqui.` : `Não deu para abrir o login do ${nome}. Tente de novo.`);
     }
     return falhou(ia, NOTA_FORA_DO_APP.entrar);
   }
@@ -267,7 +268,7 @@ export function criarIasDoMac(d: DepsIasDoMac) {
   /** O teste de uma frase (pago pela assinatura da pessoa): só quando ela pede ou no fim do fluxo que ela abriu. */
   async function testar(ia: IaDesktop): Promise<void> {
     const iaTestar = d.mac()?.iaTestar;
-    if (!iaTestar) { d.mudar(comNota(ia, "O teste roda no app do nod, no seu Mac.")); return; }
+    if (!iaTestar) { d.mudar(comNota(ia, `O teste roda no app do nod, ${noSeuMac()}.`)); return; }
     d.mudar({ teste: { ...d.ui().teste, [ia]: { estado: "testando" } }, ...comNota(ia, null) });
     const lidos: TesteDeIa[] = await iaTestar({ ia }).catch(() => []);
     const v = lidos.find((t) => t.ia === ia);

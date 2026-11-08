@@ -274,6 +274,7 @@ export type RotaDoServidor = { metodo: string; padrao: RegExp; acao?: string; in
  * As ações `semRotaDePessoa` (conta.*, ADR-124) moram nas rotas públicas de /api/conta, que não levam `acao`: cada uma
  * aponta aqui para os caminhos dela. Ação de conta nova sem entrada aqui fica sem rota e o fuzz falha (cobertura).
  */
+// ADR-157 (ADA-242/243): /conta/codigo e /conta/google/trocar são do conta.entrar (código e Google no app).
 export const CAMINHOS_DAS_ACOES_DE_CONTA: Record<string, RegExp> = {
   "conta.trocar_senha": /^\/conta\/senha$/,
   "conta.entrar": /^\/conta(\/(cadastro|reenviar|verificar|entrar|importar|outra|cancelar|recuperar|redefinir|google|google\/trocar|codigo|provisorio|troca-app))?$/,

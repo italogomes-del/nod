@@ -56,6 +56,8 @@ import { barraDoPedido, criarFilaDeGravacao, decisoesComPedido, lerAviso, lerCon
 import { abreNoNavegador } from "./links-externos.ts";
 import { arquivoDaMidia } from "./midia-mac.ts";
 import { CANAIS_MIDIA } from "../src/contracts/midia-desktop.ts";
+import type { EstaMaquina } from "../src/contracts/desktop-esta-maquina.ts";
+import { estaMaquinaDe } from "../src/domain/esta-maquina.ts";
 import { abrirPrimeiroUsoDaVm, focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
 import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
@@ -1562,6 +1564,7 @@ else {
     // confere tudo de novo contra ~/nod/<pasta do bot>; o Finder só abre com o arquivo selecionado (nada é executado).
     const homeDaMidia = () => cfgExecutor?.env.HOME ?? homedir();
     ipcMain.handle(CANAIS_MIDIA.maquina, (e): string | null => { validarRemetenteWeb(e); return maquinaIdAtual; });
+    ipcMain.handle(CANAIS_DESKTOP.estaMaquina, (e): EstaMaquina | null => { validarRemetenteWeb(e); return estaMaquinaDe({ id: maquinaIdAtual, nome: hostname(), plataforma: process.platform }); }); // ADA-243
     ipcMain.handle(CANAIS_MIDIA.existe, async (e, caminho: unknown): Promise<boolean> => { validarRemetenteWeb(e); return (await arquivoDaMidia(caminho, homeDaMidia())) !== null; });
     ipcMain.handle(CANAIS_MIDIA.mostrarNoFinder, async (e, caminho: unknown): Promise<boolean> => {
       validarRemetenteWeb(e);

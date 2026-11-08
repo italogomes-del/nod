@@ -1,6 +1,6 @@
 import type { CausaCerebroCaiu, EstadoIaDaLigacao, IaDaLigacao, IAS_DA_LIGACAO as IasDaLigacao } from "../../src/contracts/voz.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
-import { desteMac, terminalDaqui } from "../lib/plataforma-da-tela.ts";
+import { desteMac, nesteMac, plataformaDaTela, terminalDaqui } from "../lib/plataforma-da-tela.ts";
 import { botao, esc } from "../lib/render.ts";
 import { COMANDO_ATUALIZAR_IA, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
@@ -115,23 +115,23 @@ function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
     if (s.causa === "conta_sem_acesso" && !s.ponte.entrar) noTerminal = notaNoTerminal(ia, "entrar");
   } else if (daIa?.causa === "sonda_lenta") {
     // NOD-178: o CLI só demorou para responder; nem "Instalar" nem "Entrar", o app do Mac sonda de novo sozinho.
-    texto = `O ${cli} demorou para responder; o Mac está carregado. A ligação percebe quando ficar pronto.`;
+    texto = `O ${cli} demorou para responder; ${plataformaDaTela() === "windows" ? "o computador" : "o Mac"} está carregado. A ligação percebe quando ficar pronto.`;
     acao = "";
   } else if (daIa?.causa === "atualizando") {
     // NOD-9: o nod está trocando o CLI por um mais novo; nem "Instalar" nem "não está neste Mac".
-    texto = `Atualizando o ${cli} deste Mac. A ligação percebe quando ficar pronto.`;
+    texto = `Atualizando o ${cli} ${desteMac()}. A ligação percebe quando ficar pronto.`;
     acao = "";
   } else if (daIa?.causa === "cli_antigo" && daIa.versao && daIa.minima) {
     // NOD-171: o CLI está no Mac, abaixo do piso. Nem "Instalar" nem "não está neste Mac": a versão, a mínima e o comando.
-    texto = `O ${cli} deste Mac está na versão ${daIa.versao}; o nod precisa da ${versaoLegivel(daIa.minima)} ou mais nova. A ligação percebe quando ficar pronto.`;
+    texto = `O ${cli} ${desteMac()} está na versão ${daIa.versao}; o nod precisa da ${versaoLegivel(daIa.minima)} ou mais nova. A ligação percebe quando ficar pronto.`;
     acao = "";
-    noTerminal = `No Terminal deste Mac, rode “${COMANDO_ATUALIZAR_IA[ia]}”.`;
+    noTerminal = `${terminalDaqui()}, rode “${COMANDO_ATUALIZAR_IA[ia]}”.`;
   } else if (estado === "nao_autenticado") {
-    texto = s.ponte.entrar ? `O ${cli} está neste Mac; falta entrar na conta.` : `O ${cli} está neste Mac; falta entrar na conta. A ligação percebe quando ficar pronto.`;
+    texto = s.ponte.entrar ? `O ${cli} está ${nesteMac()}; falta entrar na conta.` : `O ${cli} está ${nesteMac()}; falta entrar na conta. A ligação percebe quando ficar pronto.`;
     acao = s.ponte.entrar ? botao("ligacao-ia-entrar", "Entrar", { classe: "sm", dados: { ia }, desabilitado: s.ocupado }) : "";
-    if (!s.ponte.entrar) noTerminal = `No Terminal deste Mac, rode “${LOGIN_NO_TERMINAL[ia]}” e entre na conta.`;
+    if (!s.ponte.entrar) noTerminal = `${terminalDaqui()}, rode “${LOGIN_NO_TERMINAL[ia]}” e entre na conta.`;
   } else {
-    texto = s.ponte.instalar ? `O ${cli} não está neste Mac. Instale e entre na conta; a ligação percebe quando ficar pronto.` : `O ${cli} não está neste Mac.`;
+    texto = s.ponte.instalar ? `O ${cli} não está ${nesteMac()}. Instale e entre na conta; a ligação percebe quando ficar pronto.` : `O ${cli} não está ${nesteMac()}.`;
     acao = s.ponte.instalar ? botao("ligacao-ia-instalar", "Instalar e entrar", { classe: "sm", dados: { ia }, desabilitado: s.ocupado }) : "";
     if (!s.ponte.instalar) noTerminal = notaNoTerminal(ia, "instalar");
   }
@@ -149,7 +149,7 @@ export function htmlSemIa(s: EstadoSemIa, bot: { nome: string; genero: "feminina
   const prontas = iasQuePodemAssumir(s);
   const nota = s.nota ? `<p class="lsi-nota" role="status">${esc(s.nota)}</p>` : "";
   if (prontas.length > 0) {
-    const assume = prontas.length === 1 && prontas[0] ? `O ${NOME_IA[prontas[0]]} está pronto neste Mac e pode assumir agora.` : "Há outra IA pronta neste Mac, que pode assumir agora.";
+    const assume = prontas.length === 1 && prontas[0] ? `O ${NOME_IA[prontas[0]]} está pronto ${nesteMac()} e pode assumir agora.` : `Há outra IA pronta ${nesteMac()}, que pode assumir agora.`;
     const continuar = prontas.map((ia, i) => btContinuar(ia, `Continuar com o ${NOME_IA[ia]}`, s, i === 0)).join("");
     const daQueCaiu = s.ia ? acaoDaQueCaiu(s.ia, s, false) : "";
     // Fora do app não há botão de entrar: o texto diz o que fazer no Terminal.
@@ -159,7 +159,7 @@ export function htmlSemIa(s: EstadoSemIa, bot: { nome: string; genero: "feminina
   // Um card para a IA que caiu e um para cada IA que o servidor listou (uma IA fora da lista não atende ligação aqui).
   const cards = IAS.filter((ia) => ia === s.ia || s.ias.some((i) => i.id === ia)).map((ia) => cardDaIa(ia, s)).join("");
   const rodape = `<div class="lsi-rodape">${btSaida(s)}<span>A ligação espera enquanto você resolve.</span></div>`;
-  return avisoDeEstado({ tom: "alerta", titulo, texto: `${motivo} Não há outra IA pronta neste Mac.`, papel: "alert", classe: "lig-sem-ia", extra: `${cards ? `<div class="lsi-cards">${cards}</div>` : ""}${rodape}${nota}` });
+  return avisoDeEstado({ tom: "alerta", titulo, texto: `${motivo} Não há outra IA pronta ${nesteMac()}.`, papel: "alert", classe: "lig-sem-ia", extra: `${cards ? `<div class="lsi-cards">${cards}</div>` : ""}${rodape}${nota}` });
 }
 
 /**
@@ -168,7 +168,7 @@ export function htmlSemIa(s: EstadoSemIa, bot: { nome: string; genero: "feminina
  */
 export function htmlIaVoltou(v: EstadoIaVoltou, bot: { nome: string; genero: "feminina" | "masculina" }): string {
   const quem = `${artigoDoBot(bot.genero)} ${bot.nome}`;
-  const texto = v.ia === null ? `${quem} voltou a responder.` : v.trocou ? `${quem} agora usa o ${NOME_IA[v.ia]} neste Mac. Vale para esta ligação.` : `${quem} voltou a responder pelo ${NOME_IA[v.ia]}.`;
+  const texto = v.ia === null ? `${quem} voltou a responder.` : v.trocou ? `${quem} agora usa o ${NOME_IA[v.ia]} ${nesteMac()}. Vale para esta ligação.` : `${quem} voltou a responder pelo ${NOME_IA[v.ia]}.`;
   const marca = v.ia ? logo(v.ia) : "";
   return `<div class="aviso-estado tom-info aviso-compacto lig-ia-voltou" role="status">${marca}<div class="aviso-estado-txt">${esc(texto)}</div></div>`;
 }

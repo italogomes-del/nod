@@ -63,7 +63,7 @@ const PRAZO_DO_FUZZ_MS = Math.max(600_000, N * 10_000);
  */
 const CONFIGURACOES: { nome: string; env: Record<string, string> }[] = [
   { nome: "padrão", env: { NOD_CAPTURA_TELA: "1" } },
-  { nome: "compartilhado + contas + nuvem", env: { NOD_MODO: "compartilhado", NOD_CONTAS: "1", NOD_MINHA_CONTA: "1", NOD_MAQUINA_NUVEM: "gcp" } },
+  { nome: "compartilhado + contas + nuvem", env: { NOD_MODO: "compartilhado", NOD_CONTAS: "1", NOD_MINHA_CONTA: "1", NOD_MAQUINA_NUVEM: "gcp", NOD_ONBOARDING_TEXTO: "1" } },
 ];
 /**
  * NOD-445 (ADR-146): ação sem rota nenhuma (`semRotaDePessoa` fora das de conta, que moram nas rotas públicas de

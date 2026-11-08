@@ -8,6 +8,7 @@ import { esc } from "../lib/render.ts";
 import { ehIaMac, estadoParaOBot, iaServe, logoDaIa, ordemDasIas, PROVEDOR, type IaMac, type UiIas } from "./cartao-ia.ts";
 import { desatualizado, versaoLegivel } from "./ia-fora.ts";
 import { versaoAbaixo } from "../lib/atualizacao-ia.ts";
+import { desteMac, nesteMac } from "../lib/plataforma-da-tela.ts";
 
 /**
  * A inteligência de um bot na gaveta (definido em 2026-10-10, plano "IAs: conexão, troca e escolha de modelo", PR 3;
@@ -356,9 +357,9 @@ export function motivoDoInventario(nome: string, inv: Inventario): string {
   if (inv.estado === "pronto") return "";
   // NOD-171: o CLI abaixo do piso está instalado; a frase diz "Atualize", nunca "Instale".
   const antigo = desatualizado(inv);
-  if (antigo) return `O ${nome} deste Mac está na versão ${antigo.versao}. Atualize para a ${versaoLegivel(antigo.minima)} ou mais nova para usá-lo no nod.`;
+  if (antigo) return `O ${nome} ${desteMac()} está na versão ${antigo.versao}. Atualize para a ${versaoLegivel(antigo.minima)} ou mais nova para usá-lo no nod.`;
   if (inv.motivo && !/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/.test(inv.motivo)) return inv.motivo;
-  return inv.estado === "ausente" ? `Não encontramos o ${nome} neste Mac. Instale e entre na sua conta para usá-lo no nod.` : `Entre na sua conta do ${nome} neste Mac e tente de novo.`;
+  return inv.estado === "ausente" ? `Não encontramos o ${nome} ${nesteMac()}. Instale e entre na sua conta para usá-lo no nod.` : `Entre na sua conta do ${nome} ${nesteMac()} e tente de novo.`;
 }
 
 // ---- R5 (ADR-108, canvas D1): trocar a IA do bot com tasks em andamento ------------------------------------------------

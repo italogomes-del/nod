@@ -1,6 +1,7 @@
 import type { ComandoDaConversa, ComandoDoMac } from "../../src/contracts/comandos.ts";
 import type { ItemDaBarra, ListaDaBarra } from "../lib/barra.ts";
 import { esc } from "../lib/render.ts";
+import { noSeuMac, seuMac } from "../lib/plataforma-da-tela.ts";
 
 /**
  * A lista do "/" acima do campo e a dica do comando escolhido (definido em 2026-09-28; canvas "Comandos /", C1–C3 e
@@ -26,9 +27,9 @@ const TITULO: Record<ItemDaBarra["grupo"], (bot: string) => string> = {
 export function renderListaBarra(l: ListaDaBarra, o: { filtro: string; selecionado: number; bot: string; doMacEm: number | null }): string {
   const partes: string[] = [];
   const cabecalho = o.filtro ? `${l.itens.length} ${l.itens.length === 1 ? "comando" : "comandos"} com “${esc(o.filtro)}”` : "Comandos";
-  partes.push(`<div class="barra-cab"><span>${cabecalho}</span><span>${o.doMacEm ? `do seu Mac · lista das ${esc(hora(o.doMacEm))}` : ""}</span></div>`);
+  partes.push(`<div class="barra-cab"><span>${cabecalho}</span><span>${o.doMacEm ? `do ${seuMac()} · lista das ${esc(hora(o.doMacEm))}` : ""}</span></div>`);
   if (l.soDoTerminal) {
-    partes.push(`<div class="barra-aviso"><b>/${esc(l.soDoTerminal)}</b> é só do terminal. Rode no seu Mac, no Claude Code. ↵ manda como texto para ${esc(o.bot)}.</div>`);
+    partes.push(`<div class="barra-aviso"><b>/${esc(l.soDoTerminal)}</b> é só do terminal. Rode ${noSeuMac()}, no Claude Code. ↵ manda como texto para ${esc(o.bot)}.</div>`);
   }
   let grupo: ItemDaBarra["grupo"] | null = null;
   l.itens.forEach((item, i) => {
@@ -40,7 +41,7 @@ export function renderListaBarra(l: ListaDaBarra, o: { filtro: string; seleciona
     partes.push(`<button type="button" class="barra-item" role="option" aria-selected="${i === o.selecionado ? "true" : "false"}" data-indice="${i}" data-nome="${esc(item.nome)}"><span class="barra-nome">/${comDestaque(item.nome, o.filtro)}</span><span class="barra-desc">${esc(item.descricao)}</span>${item.etiqueta ? `<span class="barra-etiqueta">${esc(item.etiqueta)}</span>` : ""}</button>`);
   });
   if (l.itens.length === 0 && !l.soDoTerminal) partes.push(`<div class="barra-vazio">Nenhum comando com “${esc(o.filtro)}”. ↵ manda como texto.</div>`);
-  if (l.semCatalogo) partes.push(`<div class="barra-vazio">As suas skills aparecem aqui depois do primeiro turno de um bot no Claude Code do seu Mac.</div>`);
+  if (l.semCatalogo) partes.push(`<div class="barra-vazio">As suas skills aparecem aqui depois do primeiro turno de um bot no Claude Code do ${seuMac()}.</div>`);
   partes.push(`<div class="barra-rodape"><span><b>↑ ↓</b> escolher</span><span><b>↵</b> ou <b>tab</b> usar</span><span><b>esc</b> fechar</span><span class="barra-dica-nomes">os nomes do terminal também valem: /context, /compact</span></div>`);
   return partes.join("");
 }
@@ -52,5 +53,5 @@ export function renderDicaBarra(c: { conversa: ComandoDaConversa; resto: string 
     return `<b>/${esc(c.conversa.nome)}</b> · ${esc(c.conversa.descricao)} · <span>${efeito}</span>`;
   }
   const argumento = c.mac.argumento ? ` · recebe ${esc(c.mac.argumento)}` : " · escreva o que ela recebe depois do nome";
-  return `<b>/${esc(c.mac.nome)}</b>${c.mac.descricao ? ` · ${esc(c.mac.descricao)}` : ""} · <span>${esc(c.mac.origem)} · roda no seu Mac${c.resto ? "" : argumento}</span>`;
+  return `<b>/${esc(c.mac.nome)}</b>${c.mac.descricao ? ` · ${esc(c.mac.descricao)}` : ""} · <span>${esc(c.mac.origem)} · roda ${noSeuMac()}${c.resto ? "" : argumento}</span>`;
 }

@@ -11,6 +11,7 @@ import type { ResumoDaChave } from "../lib/chave-ssh.ts";
 import { HISTORICO_INICIAL, type HistoricoDoBot } from "../lib/historico-perfil.ts";
 import type { ContasIaDto } from "../../src/contracts/contas-ia.ts";
 import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
+import type { EstaMaquina } from "../../src/contracts/desktop-esta-maquina.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
@@ -471,6 +472,11 @@ export type Estado = {
   /** ADR-090: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
   maquinas: MaquinasDto | null;
   /**
+   * ADA-243 (definido em 2026-11-07): a máquina desta instalação do app (a ponte `estaMaquina`). null = web pura, app
+   * antigo ou ainda sem chave: a web não chuta qual é "este computador".
+   */
+  estaMaquina: EstaMaquina | null;
+  /**
    * NOD-96 (computador do bot v2): o computador da pessoa. null = a rota não existe (NOD_COMPUTADORES desligado) ou
    * ainda não leu — a web fica no modelo de antes. `computadorMemoria` é o que a web lembra entre leituras (esperas,
    * ✓, telas fechadas por uma operação); `computadorUi`, o realce e o diálogo do painel.
@@ -640,6 +646,7 @@ export type Acao =
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
+  | { tipo: "esta-maquina"; maquina: EstaMaquina | null }
   | { tipo: "hidratar-computador-pessoa"; dto: ComputadorPessoaDto | null; agora: number }
   | { tipo: "computador-ui"; ui: Partial<ComputadorUi> }
   | { tipo: "conectar-maquina"; conectar: ConectarMaquina | null }
@@ -747,6 +754,7 @@ export const estadoInicial: Estado = {
   statusMemoria: "",
   chaves: null,
   maquinas: null,
+  estaMaquina: null,
   computadorPessoa: null,
   computadorMemoria: MEMORIA_INICIAL,
   computadorUi: UI_COMPUTADOR_INICIAL,
@@ -1905,6 +1913,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, chaves: acao.chaves };
     case "hidratar-maquinas":
       return { ...estado, maquinas: acao.maquinas };
+    case "esta-maquina":
+      return { ...estado, estaMaquina: acao.maquina };
     case "hidratar-computador-pessoa": {
       if (!acao.dto) return estado.computadorPessoa ? { ...estado, computadorPessoa: null, computadorMemoria: MEMORIA_INICIAL, computadorUi: UI_COMPUTADOR_INICIAL } : estado;
       const computadorMemoria = lembrarComputador(estado.computadorPessoa, acao.dto, estado.computadorMemoria, acao.agora);

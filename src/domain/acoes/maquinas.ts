@@ -1,4 +1,5 @@
 import type { DefinicaoAcao } from "../../contracts/acoes.ts";
+import { PROPRIEDADES_MAQUINAS as P } from "../../contracts/ferramentas-maquinas.ts";
 
 /**
  * Máquinas, nuvem e computadores (NOD-391, ADR-135; Onda 4, NOD-396). Nunca pelo chat: o que entrega um segredo
@@ -7,6 +8,13 @@ import type { DefinicaoAcao } from "../../contracts/acoes.ts";
  */
 
 const falta = { estado: "falta", onda: "NOD-396" } as const;
+
+/**
+ * ADA-243 (2026-11-07): escolher a máquina padrão sai da Onda 4 e fica `vivo` — a tela "Onde os bots trabalham" do
+ * onboarding (jornada B) e o seletor "Máquina padrão" chamam o mesmo executor que o gerir_maquinas de QUALQUER bot
+ * (src/use-cases/acoes/maquinas.ts). Risco "muda": aplica direto em todo modo (se desfaz pedindo de novo).
+ */
+const VIVO_MAQUINAS = { estado: "vivo", via: { ferramenta: "gerir_maquinas" }, contrato: "tests/integration/paridade-maquinas.test.ts" } as const;
 
 export const ACOES_MAQUINAS = [
   { id: "maquinas.criar_chave", titulo: "Emitir uma chave de máquina", risco: "pessoa_confirma", cartaoNoChat: false, chat: { estado: "nunca", motivo: "a chave crua sai uma vez e é segredo: não pode ir para a conversa" } },
@@ -17,7 +25,7 @@ export const ACOES_MAQUINAS = [
   { id: "maquinas.editar", titulo: "Renomear ou ajustar uma máquina", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "maquinas.desconectar", titulo: "Desconectar uma máquina", risco: "arriscada", cartaoNoChat: false, chat: falta },
   { id: "maquinas.atualizar_ia", titulo: "Atualizar a IA instalada numa máquina", risco: "muda", cartaoNoChat: false, chat: falta },
-  { id: "maquinas.definir_padrao", titulo: "Escolher a máquina padrão", risco: "muda", cartaoNoChat: false, chat: falta },
+  { id: "maquinas.definir_padrao", titulo: "Escolher a máquina padrão", schema: { type: "object", properties: { maquina: P.maquina, qualquer_uma: P.qualquer_uma }, required: [], additionalProperties: false }, risco: "muda", cartaoNoChat: false, chat: VIVO_MAQUINAS, casoDeUso: "maquinas.definir_padrao" },
   { id: "maquinas.escolher_do_bot", titulo: "Escolher a máquina de um bot", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "maquinas.definir_bots", titulo: "Escolher os bots de uma máquina", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "maquinas.rodar_desta_vez", titulo: "Rodar desta vez noutra máquina", risco: "muda", cartaoNoChat: false, chat: falta },

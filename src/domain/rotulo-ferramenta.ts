@@ -54,6 +54,7 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   gerir_acessos: ["Mudou quem usa o app", "Mudando quem usa o app"],
   // NOD-449: a tela Não lidos pela conversa (listar, marcar, desfazer).
   nao_lidos: ["Mexeu nos não lidos", "Mexendo nos não lidos"],
+  gerir_maquinas: ["Mexeu nas máquinas", "Mexendo nas máquinas"],
   // NOD-119: o card que muda a barra lateral só depois de a pessoa confirmar.
   ajustar_barra_lateral: ["Sugeriu mudar a barra lateral", "Sugerindo mudar a barra lateral"],
   // NOD-50: o cartão de credencial; o rótulo nunca cita o valor (o bot nem o tem).

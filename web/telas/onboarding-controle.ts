@@ -11,6 +11,7 @@ import type { UiIas } from "./cartao-ia.ts";
 import { criarEsteComputador } from "./este-computador.ts";
 import { htmlConversaTexto, LINHA_PULOU, SO_OLHAR, type PassoTexto } from "./conversa-texto.ts";
 import { destinoAoFimDoOla, htmlCamada, htmlGuia, notaForaDoApp, ORDEM_IAS, textoComoLiberar, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
+import { nesteMac } from "../lib/plataforma-da-tela.ts";
 
 /**
  * O controlador do onboarding por ligação (definido em 2026-10-04, ADR-077): a abertura, a sondagem da IA do Mac, o
@@ -306,7 +307,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
 
   /** "Testar de novo" fora do app do Mac (a causa veio do servidor, de outro computador da pessoa): diz onde testar. */
   async function testarIa(ia: IaDesktop): Promise<void> {
-    if (!window.nodDesktop?.iaTestar) { notaIa = "O teste roda no app do nod, neste Mac. Abra o app para testar de novo."; deps.aoMudar(); return; }
+    if (!window.nodDesktop?.iaTestar) { notaIa = `O teste roda no app do nod, ${nesteMac()}. Abra o app para testar de novo.`; deps.aoMudar(); return; }
     await teste.testar(ia);
   }
 

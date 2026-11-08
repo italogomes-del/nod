@@ -66,7 +66,7 @@ import { abrir as abrirLote, cancelar as cancelarLote, marcar as marcarLote, mar
 import { executarLote, pedidoDaIa, type DepsDoLote } from "./lib/lote-executar.ts";
 import { botsDoLote, motivoDoDestinoIndisponivel, textoDaContagem, textoDoResultado as textoDoResultadoLote, textoMudando as textoMudandoLote } from "./telas/agentes-lote.ts";
 import { botCasaComBusca } from "./telas/config-agentes.ts";
-import type { AlvoAviso } from "../src/contracts/desktop.ts";
+import type { AlvoAviso, IaDesktop } from "../src/contracts/desktop.ts";
 import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
@@ -88,6 +88,7 @@ import { criarReleituraAdiada } from "./lib/releitura-adiada.ts";
 import { tabelaComo } from "./lib/texto-formatado.ts";
 import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type PedidoPareamento } from "./lib/parear-mac.ts";
 import { abrirPareamento } from "./telas/parear-mac.ts";
+import { abrirOiDeNovo, mostrarEsteComputador } from "./telas/oi-de-novo.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarPuxadorDeepLink, destinoDoAlvo, leituraConta } from "./lib/deep-link.ts";
@@ -150,7 +151,7 @@ import { agendaPorLer, escNaAgenda } from "./estado/agenda.ts";
 import { diaParaFocarNoMes } from "./telas/agenda-rotinas.ts";
 import { confirmarCriarBot, criarRapido } from "./telas/confirmar-criar-bot.ts";
 import { USOS } from "./telas/este-mac.ts";
-import { botsDaPessoa, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
+import { botsDaPessoa, lerEstaMaquina, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
 import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
 import type { DormirAposMin, TamanhoMaquinaNuvem } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
@@ -825,6 +826,18 @@ const canalAvisos = criarCanalAvisos((alvo) => abrirAlvoDoAviso(alvo), () => { i
 const deepLink = criarPuxadorDeepLink(window.nodDesktop, () => !!estado.sessao, (alvo) => abrirAlvoDoAviso(alvo));
 // definido em 2026-10-04 (ADR-070): no app do Mac, a escolha de tema mora em preferencias.json (o localStorage é apagado a
 // cada conexão); ao abrir, ela volta para o localStorage e para o data-theme, e Preferências mostra o botão certo.
+/**
+ * ADA-243: pergunta à ponte qual é esta máquina (no Windows o motor só grava o id ao conectar, então relê junto com as
+ * máquinas). Web pura ou app antigo: fica null, e o aviso por máquina não chuta.
+ */
+function relerEstaMaquina(): void {
+  const ponte = window.nodDesktop?.estaMaquina;
+  if (!ponte) return;
+  void ponte().then((v) => {
+    const m = lerEstaMaquina(v);
+    if (m?.id !== estado.estaMaquina?.id || m?.nome !== estado.estaMaquina?.nome) dispatch({ tipo: "esta-maquina", maquina: m });
+  }, () => undefined);
+}
 void window.nodDesktop?.preferencias?.().then((p) => { if (p.tema) aplicarTema(p.tema, document.documentElement); }, () => undefined);
 const avisador = criarAvisador({
   relogio: { agora: () => Date.now(), esperar: (ms, fn) => { const t = window.setTimeout(fn, ms); return () => window.clearTimeout(t); } },
@@ -1184,6 +1197,44 @@ document.addEventListener("keydown", () => focoPendente.descartar(), true);
 let perfilPendente: Record<string, MudancaDePerfil> = {};
 
 const marcaDoPerfil = criarMarcaDoPerfil();
+/**
+ * ADA-243 (jornada B, atrás de NOD_ONBOARDING_TEXTO): "Oi de novo · este computador" uma vez por máquina para quem já
+ * concluiu o onboarding. Só pergunta à ponte o "já vi" quando o resto já permite (flag, esta máquina, onboarding lido).
+ */
+let oiDeNovoPedido = false;
+function talvezAbrirOiDeNovo(): void {
+  const ponte = window.nodDesktop;
+  const aqui = estado.estaMaquina;
+  if (oiDeNovoPedido || !estado.sessao || !estado.maquinas || !estado.onboarding) return;
+  const conectadaAqui = !!aqui && (estado.maquinas.maquinas ?? []).some((m) => m.id === aqui.id && m.conectada);
+  if (!mostrarEsteComputador({ flag: contas?.onboardingTexto === true, temPonte: !!ponte?.esteComputador, estaMaquina: !!aqui, maquinaConectada: conectadaAqui, onboardingConcluido: estado.onboarding.concluidoEm !== null, vistoAqui: false })) return;
+  if (!ponte?.esteComputador || !aqui) return;
+  oiDeNovoPedido = true;
+  const visto = ponte.esteComputador;
+  void visto.jaViu().then((jaViu) => {
+    if (jaViu) return;
+    const pi = ponte.ias;
+    const ent = ponte.iaEntrar, inst = ponte.iaInstalar;
+    const ias = pi ? { entrar: (ia: IaDesktop) => pi.entrar(ia), instalar: (ia: IaDesktop) => pi.instalar(ia) } : ent && inst ? { entrar: (ia: IaDesktop) => ent(ia), instalar: (ia: IaDesktop) => inst(ia) } : undefined;
+    abrirOiDeNovo({
+      nome: estado.onboarding?.campos.apelido ?? "",
+      estaMaquina: aqui,
+      maquinaAqui: () => (estado.maquinas?.maquinas ?? []).find((m) => m.id === aqui.id),
+      padrao: () => {
+        const p = (estado.maquinas?.maquinas ?? []).find((m) => m.id === estado.maquinas?.padraoId && m.papel !== "computador");
+        return p ? { id: p.id, nome: p.nome, conectada: p.conectada } : null;
+      },
+      ...(ias ? { ias } : {}),
+      relerMaquinas: async () => { await chavesAtuais(); },
+      definirPadrao: async (id) => {
+        await api!.maquinaPadrao(id);
+        dispatch({ tipo: "invalidar", quais: ["maquinas", "frota"] });
+      },
+      marcarVisto: () => visto.marcar(),
+    });
+  }, () => undefined);
+}
+
 function dispatch(acao: Acao): void {
   // Abrir Trabalhos relê agora, sem esperar a janela de algum frame de turno.
   if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
@@ -1193,6 +1244,7 @@ function dispatch(acao: Acao): void {
   render();
   if (saiu) depoisDeSair();
   void reidratar();
+  talvezAbrirOiDeNovo();
 }
 
 /**
@@ -1764,7 +1816,10 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   }
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
-  if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
+  if (q === "maquinas") {
+    relerEstaMaquina();
+    return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
+  }
   // NOD-367: a falha vira a linha "Tentar de novo" em Feedback, sem a faixa vermelha e sem pedir de novo a cada quadro.
   if (q === "agenda") {
     // NOD-85: lê a janela do estado; a resposta de uma janela que já mudou é ignorada no reducer.

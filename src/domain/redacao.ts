@@ -220,6 +220,26 @@ export function motivoEmPortugues(motivo: string): string {
 /** A máquina de um turno caído, como a chave dela diz (maquina_tokens, 0067); null = sem chave (o Mac do modo local). */
 export type MaquinaDaQueda = { nome: string; plataforma: PlataformaMaquina | null };
 
+/** ADA-243 (jornada B): os motivos de IA ausente que diziam "neste Mac" mesmo no Windows (o caso de 05/11). */
+const IA_AUSENTE_NA_MAQUINA: Partial<Record<MotivoFalha | MotivoInterrupcao, (nome: string) => string>> = {
+  motor_ausente: (n) => `a IA não está instalada no ${n}; instale e entre na conta em Configurações › Computadores`,
+  nao_autenticado: (n) => `a conta da IA não está conectada no ${n}; entre na conta em Configurações › Computadores`,
+  lancamento_falhou: (n) => `a IA não conseguiu abrir no ${n}`,
+};
+
+/**
+ * ADA-243: o motivo com a máquina em que o turno rodou. Windows e Linux (máquina do motor, ADR-147) são nomeados; o Mac,
+ * a chave sem sistema e o modo local (sem chave) ficam com a frase de sempre.
+ */
+export function motivoDependeDaMaquina(motivo: string): boolean {
+  return Object.hasOwn(IA_AUSENTE_NA_MAQUINA, motivo);
+}
+
+export function motivoNaMaquina(motivo: string, maquina: MaquinaDaQueda | null): string {
+  const f = Object.hasOwn(IA_AUSENTE_NA_MAQUINA, motivo) ? IA_AUSENTE_NA_MAQUINA[motivo as keyof typeof IA_AUSENTE_NA_MAQUINA] : undefined;
+  return f && maquina && ehMaquinaDoMotor(maquina.plataforma) ? f(maquina.nome) : motivoEmPortugues(motivo);
+}
+
 /**
  * definido em 2026-10-09: o `maquina_sem_contato` de quem rodava na VM dizia "seu Mac parou de responder" (o Ze 1 no
  * motor Linux, com o Mac aberto na mesa). A máquina Linux é nomeada, com as causas dela; o Mac, a chave que ainda não

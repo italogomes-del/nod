@@ -17,7 +17,7 @@ import { assinatura } from "../lib/assinatura.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import type { EstadoMascote } from "../lib/mascote.ts";
-import { maquinaDoBot } from "./maquinas.ts";
+import { iaDoBotAgora, maquinaDoBot, presencaPorMaquina } from "./maquinas.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { acordandoNaFila, motivoLegivel } from "../lib/maquina-nuvem.ts";
 import { COMET_MS, contagemDasAcoes, estadoDaFala, falaNoBalao, geracaoDoBalao, GRUPOS_A_VISTA, itensDoPensamento, textoEmLf, textoEscrevendo, WINK_MS, type AtividadeTurno, type ItemDoPensamento, type LinhaDoResumo, type VigiaDaAtividade } from "../lib/atividade.ts";
@@ -507,7 +507,7 @@ const temMidiaDoBot = (m: Mensagem): boolean => m.autoria.autor_tipo !== "pessoa
  * `destaVez` (ADR-090, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
  * a própria linha da fila oferece "Rodar em <outra> desta vez", sem faixa por cima da conversa.
  */
-type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string }; tentarAgora?: string; recusa?: string } | { tipo: "cancelando" } | { tipo: "cancelada" };
+type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string }; tentarAgora?: string; recusa?: string; computadores?: true } | { tipo: "cancelando" } | { tipo: "cancelada" };
 
 /**
  * Onde a mensagem da pessoa está na fila (definido em 2026-09-24): o turno que ela disparou ainda
@@ -545,10 +545,14 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
     return { tipo: "na_fila", turnoId: emCurso.id, texto: `Acordando ${doTrabalho?.nome ?? doBot?.nome ?? "a máquina"}… · costuma levar 1 a 2 min` };
   }
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
-  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
+  // ADA-243: sem IA NESTE computador, a linha diz "neste computador" (e não pede terminal de outra máquina).
+  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: doBot.id === estado.estaMaquina?.id ? "Na fila · sem IA neste computador (entre no Claude Code ou no Codex em Configurações › Computadores)" : `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
   if (doBot && !doBot.conectada) {
     const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.papel !== "computador" && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
-    return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}`, ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };
+    // ADA-243 (spec, jornada B): a máquina do bot está desligada — o bot diz onde trabalha e o que a pessoa pode fazer.
+    // O turno que a pessoa mandou "desta vez" para outra máquina segue com a linha de antes (não é a máquina do bot).
+    const texto = destaVez ? `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}` : `Eu trabalho no ${doBot.nome}, que está desligado; começo quando ele voltar, ou mude meu computador em`;
+    return { tipo: "na_fila", turnoId: emCurso.id, texto, ...(destaVez ? {} : { computadores: true as const }), ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };
   }
   const outra = c.turnosPendentes.find((p) => p.id === emCurso.id && p.conversaId !== c.conversa.id);
   if (outra) {
@@ -564,7 +568,8 @@ function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
   if (s.tipo === "cancelando") return `<div class="fila-chip">Cancelando…${botao("desfazer-cancelamento", "Desfazer", { classe: "link", id: turnoId })}</div>`;
   const destaVez = s.destaVez ? botao("rodar-desta-vez", `Rodar em ${esc(s.destaVez.nome)} desta vez`, { classe: "link", dados: { conversa: s.destaVez.conversaId, maquina: s.destaVez.maquinaId } }) : "";
   const tentar = s.tentarAgora ? botao("nuvem-acordar", "Tentar agora", { classe: "link", dados: { maquina: s.tentarAgora } }) : "";
-  const chip = `<div class="fila-chip" role="status"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${tentar}${destaVez}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
+  const computadores = s.computadores ? ` ${botao("secao-espaco", "Configurações › Computadores", { classe: "link", dados: { secao: "maquinas" } })}` : "";
+  const chip = `<div class="fila-chip" role="status"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${computadores}${tentar}${destaVez}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
   return s.recusa ? `${chip}<p class="cx-erro" role="alert">${esc(s.recusa)}</p>` : chip;
 }
 
@@ -1816,7 +1821,7 @@ function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa:
     ? `Trabalhando${mudo !== null ? `${sep}sem novidade há ${mudo} min` : ""}${comEsperam}`
     : mascote === "pensando"
     ? `Pensando${comEsperam}`
-    : esperam ? "Aguardando você" : mascote === "na_fila" ? "Na fila" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
+    : esperam ? "Aguardando você" : mascote === "na_fila" ? "Na fila" : estado.executor?.atual === "catcher" ? "Simulação" : (a ? esc(presencaPorMaquina(iaDoBotAgora(estado, a)) ?? "") : "") || "Disponível";
   return { html, ativa: mascoteAnimado(mascote) || emLigacao };
 }
 

@@ -30,8 +30,8 @@ describe("QA #678: o IPC só atende a tela de conexão", () => {
     // 5/11: os canais da janela web (`nod:ia-*`) passam pela guarda da janela (login-ia-windows.ts `daJanelaWeb`).
     const daJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.ia\w+, \(e, ia: unknown\) => \{\s*const lida = iaDaJanela\(e, ia\);\s*if \(!lida\) throw new Error\("entrada_invalida"\);/g) ?? [];
     // ADA-242: o Google no app e o "já vi" da janela web passam pela mesma guarda (`daJanela`, daJanelaWeb).
-    const contaDaJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.(?:desafioConta|trocarConta|google\w+|esteComputador\w+), (?:async )?\(e(?:, (?:url|codigo): unknown)?\) => (?:\{ if \(!?daJanela\(e\)\)|\(daJanela\(e\) \?)/g) ?? [];
-    expect(contaDaJanela).toHaveLength(7);
+    const contaDaJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.(?:desafioConta|trocarConta|google\w+|esteComputador\w+|estaMaquina), (?:async )?\(e(?:, (?:url|codigo): unknown)?\) => (?:\{ if \(!?daJanela\(e\)\)|\(daJanela\(e\) \?)/g) ?? [];
+    expect(contaDaJanela).toHaveLength(8); // ADA-243: + estaMaquina
     expect(main).toMatch(/const daJanela = \(e: IpcMainInvokeEvent\) => daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\);/);
     expect(handles).toBeGreaterThanOrEqual(7);
     expect(guardados.length + daJanela.length + contaDaJanela.length).toBe(handles);

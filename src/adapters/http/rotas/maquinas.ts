@@ -13,6 +13,7 @@ import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 import { assertUuid } from "../../../use-cases/apoio-l7.ts";
 import { rodarDestaVezComConta, rodarTrabalhoDestaVez } from "../../../use-cases/contas-ia.ts";
+import { EXECUTORES_MAQUINAS, exigirChaveViva } from "../../../use-cases/acoes/maquinas.ts";
 
 /**
  * "Minhas chaves" (E1.3, ADR-031): a pessoa da sessão emite, lista e revoga as chaves dos próprios
@@ -35,13 +36,6 @@ function nomeDaMaquina(v: unknown): string {
  * ADR-090: a chave existe, é da pessoa do escopo e não foi revogada — só assim um bot pode ser preso a ela. NOD-94: a
  * máquina só-computador nunca pega turno, então não é escolha de onde o bot trabalha (404, como a inexistente).
  */
-async function exigirChaveViva(d: Deps, id: unknown): Promise<string> {
-  if (typeof id !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "máquina" });
-  const viva = (await d.repos.maquinaTokens.listar()).find((c) => c.id === id && c.revogadaEm === null && c.papel !== "computador");
-  if (!viva) throw new ErroDeDominio("nao_encontrado", { cause: "máquina" });
-  return viva.id;
-}
-
 export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string }; nuvem?: boolean;
   /** NOD-94: a máquina do convite `convite` pareou — a instalação por SSH que o criou fica `pronta` com ela. */
   pareadaPorConvite?: (e: { escopo: Escopo; convite: string; maquinaId: string }) => Promise<void> | void }): Rota[] {
@@ -198,8 +192,9 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       padrao: /^\/maquinas\/padrao$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { maquinaId?: unknown };
-        const r = await deps.dentro(ctx.escopo, async (d) => d.repos.preferencias.definirMaquinaPadrao(corpo.maquinaId === null ? null : await exigirChaveViva(d, corpo.maquinaId)));
-        ctx.json(200, { padraoId: r.maquinaPadraoId ?? null });
+        // ADA-243: o executor único, o mesmo do gerir_maquinas (paridade tela × chat).
+        const r = await deps.dentro(ctx.escopo, async (d) => EXECUTORES_MAQUINAS["maquinas.definir_padrao"](d, { maquinaId: corpo.maquinaId }));
+        ctx.json(200, { padraoId: r.data.padraoId });
       },
     },
     {
