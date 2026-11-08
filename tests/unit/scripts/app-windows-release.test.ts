@@ -48,6 +48,12 @@ describe("ADA-229: release e CI", () => {
     expect(ci).toContain("'scripts\\windows\\testar-app.ps1') | ForEach-Object { Invoke-ScriptAnalyzer");
     expect(ci).toContain("npm run desktop:windows");
   });
+  it("o Esperar do testar-app.ps1 trata o Access denied da exclusão pendente como \"ainda não\"", () => {
+    const script = ler("scripts/windows/testar-app.ps1");
+    const esperar = script.slice(script.indexOf("function Esperar"), script.indexOf("Write-Output '== 1."));
+    expect(esperar).toMatch(/try \{ if \(& \$Condicao\) \{ return \} \} catch \{/);
+  });
+
   it("o testar-app.ps1 é ASCII (o Windows PowerShell 5.1 lê sem BOM como ANSI)", () => {
     expect([...ler("scripts/windows/testar-app.ps1")].every((c) => c.charCodeAt(0) < 128)).toBe(true);
   });

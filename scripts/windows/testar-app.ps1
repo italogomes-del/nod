@@ -51,7 +51,14 @@ function ProcessosDoApp {
 
 function Esperar([scriptblock]$Condicao, [int]$Segundos, [string]$Texto) {
   $ate = (Get-Date).AddSeconds($Segundos)
-  while (-not (& $Condicao)) { if ((Get-Date) -gt $ate) { throw ('app do Windows: ' + $Texto) }; Start-Sleep -Seconds 1 }
+  $ultimo = $null
+  # Arquivo com exclusao pendente (o desinstalador ainda apagando) faz o Test-Path dar
+  # "Access denied": conta como "ainda nao" e tenta de novo ate o prazo.
+  while ($true) {
+    try { if (& $Condicao) { return } } catch { $ultimo = $_.Exception.Message }
+    if ((Get-Date) -gt $ate) { throw ('app do Windows: ' + $Texto + $(if ($ultimo) { ' (' + $ultimo + ')' } else { '' })) }
+    Start-Sleep -Seconds 1
+  }
 }
 
 Write-Output '== 1. instalacao silenciosa'
