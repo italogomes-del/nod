@@ -262,6 +262,13 @@ jobs:
           node-version: "24.19.0"
           cache: npm
       - run: npm ci
+      # Vazão (08/11): o binário do Electron vem do GitHub Releases e um 504 de lá derrubava o job. Com o cache (chave =
+      # versão no package-lock) o download só acontece quando o Electron muda.
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
       - run: npm run desktop:build
       # O mesmo passo do desktop-release.yml, com o mesmo prazo: um Electron travado não prende o runner.
       - name: Smoke da janela
@@ -384,13 +391,28 @@ jobs:
           if-no-files-found: warn
       # ADA-229 (ADR-152): o app desktop do Windows (Electron, NSIS de 1 clique do electron-builder, sem assinar):
       # instala em silêncio, confere o nod.exe, os atalhos e Aplicativos, abre e fecha o app e desinstala.
+      # Vazão (08/11): o Electron e as ferramentas do electron-builder (NSIS, winCodeSign) vêm do GitHub Releases; um 504
+      # de lá derrubava o job. Cache com a versão no package-lock na chave, e uma nova tentativa só para erro 5xx/timeout
+      # de download (falha de build de verdade cai na primeira).
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
       - name: app desktop (montar)
         shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          npm run desktop:windows
-          if ($LASTEXITCODE -ne 0) { throw 'desktop:windows falhou' }
+          for ($i = 1; $i -le 3; $i++) {
+            npm run desktop:windows 2>&1 | Tee-Object -Variable saida
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($i -eq 3 -or -not ($saida -match 'Response code 5\d\d|ETIMEDOUT|ECONNRESET')) { throw 'desktop:windows falhou' }
+            Write-Host "download do GitHub Releases falhou (tentativa $i); de novo em 30 s"
+            Start-Sleep -Seconds 30
+          }
       - name: app desktop (instalar, abrir e desinstalar)
         shell: powershell
         run: |
