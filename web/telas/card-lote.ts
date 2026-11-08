@@ -15,6 +15,7 @@ const VERBO_DO_LOTE: Record<AcaoNoLote["tipo"], string> = {
   mudar_modo: "Mudar modo",
   restaurar_versao: "Restaurar versão de",
   excluir_time: "Excluir o time",
+  remover_computador: "Remover o nod de",
   acessos_em_lote: "Mudar o acesso de",
   padrao_acesso: "Padrão do app",
   desfazer_acessos: "Desfazer acessos no",
@@ -24,6 +25,7 @@ const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "
 /** Por que a ação esperou você, quando não foi só o modo manual (QA de 2026-10-07: uma frase por tipo, não uma genérica). */
 function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">): string {
   // Emenda de 2026-10-18 da ADR-059: ligar o total é sempre da pessoa, em qualquer modo do Nod.
+  if (a.tipo === "remover_computador") return "Tirar o nod de um computador sempre espera o seu ok. Dá para instalar de novo depois.";
   // ADA-241: Ler e alterar para vários bots, ou como padrão do app, deixa cada um mudar coisas fora do nod.
   if (motivo === "acesso_escrita") return a.tipo === "padrao_acesso" ? `Com Ler e alterar como padrão, cada bot novo já nasce podendo mudar coisas no ${a.app ?? "app"}. Por isso espera o seu ok.` : `Ler e alterar deixa cada bot mudar coisas no ${a.app ?? "app"} (enviar, apagar, editar). Por isso espera o seu ok.`;
   if (motivo === "ligar_total") return "Ignorar todas as aprovações só liga com o seu ok: o Nod nunca põe um bot nesse modo sozinho.";
@@ -34,6 +36,12 @@ function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">
 
 function juntar(nomes: readonly string[]): string {
   return nomes.length <= 1 ? (nomes[0] ?? "") : `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
+}
+
+/** ADA-245 (critério 4): o card nomeia quem assume, como o diálogo; sem ninguém (o único computador), os bots esperam. */
+function destinoDosBots(n: number, assume: string | null | undefined): string {
+  if (assume === null) return n === 1 ? "espera um computador" : "esperam um computador";
+  return `${n === 1 ? "passa" : "passam"} para ${assume ?? "o computador padrão"}`;
 }
 
 function detalheDaAcao(a: AcaoNoLote): string {
@@ -47,6 +55,7 @@ function detalheDaAcao(a: AcaoNoLote): string {
     case "dar_acesso": return `${a.app ?? ""}, ${a.nivel === "escrita" ? "ler e alterar" : "ler"}`;
     case "mudar_modo": return a.modo ? `para ${MODO_HUMANO[a.modo]}` : "";
     case "excluir_time": return a.membros?.length ? `${juntar(a.membros)} ${a.membros.length === 1 ? "vai" : "vão"} para Sem time, na mesma ordem. Nenhum bot é excluído.` : "o time está vazio";
+    case "remover_computador": return [a.membros?.length ? `${juntar(a.membros)} ${destinoDosBots(a.membros.length, a.assume_nome)}` : "nenhum bot roda lá", a.manter_ias ? "o Claude e o ChatGPT ficam lá" : "tira também o Claude e o ChatGPT que o nod instalou", a.manter_conexao ? "continua ligado à sua conta" : "sai da sua conta"].join(" · ");
     case "acessos_em_lote": return a.todos ? `${a.app ?? ""}, ${NIVEL_HUMANO[a.nivel_lote ?? "nenhum"]} para todos os bots` : `${a.app ?? ""}, ${NIVEL_HUMANO[a.nivel_lote ?? "nenhum"]}: ${juntar(a.bots_nomes ?? [])}`;
     case "padrao_acesso": return `${a.app ?? ""}: bots novos começam com ${NIVEL_HUMANO[a.nivel_lote ?? "nenhum"]}${a.aplicar === false ? "" : "; quem segue o padrão também muda"}`;
     case "desfazer_acessos": return `${a.app ?? ""}: volta cada bot ao nível de antes`;
@@ -64,6 +73,17 @@ export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBo
   const esperando = c.acoes.filter((a) => a.estado === "esperando").length;
   // NOD-437 (protótipo aprovado): o card de excluir um time é uma pergunta direta, com o verbo no botão.
   const soTime = c.acoes.filter((a) => a.estado === "esperando");
+  if (aberto && soTime.length === 1 && soTime[0]!.tipo === "remover_computador") {
+    const t = soTime[0]!;
+    return cardProposta({
+      id: p.id,
+      classe: "card-lote card-remover-computador",
+      titulo: `Remover o nod de ${t.alvoNome}?`,
+      linhas: [esc(detalheDaAcao(t))],
+      extra: `<input type="checkbox" data-lote-i="${t.i}" checked hidden aria-hidden="true" />`,
+      acoes: `${botao("decidir-lote", "Remover", { classe: "cp-sim", id: p.id })}${botao("recusar-decisao", "Agora não", { classe: "cp-nao", id: p.id })}`,
+    });
+  }
   if (aberto && soTime.length === 1 && soTime[0]!.tipo === "excluir_time") {
     const t = soTime[0]!;
     return cardProposta({

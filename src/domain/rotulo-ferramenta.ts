@@ -51,6 +51,7 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   gerir_apps: ["Mexeu nas páginas", "Mexendo nas páginas"],
   gerir_canvas: ["Mexeu no Canvas", "Mexendo no Canvas"],
   gerir_times: ["Organizou os times", "Organizando os times"],
+  remover_computador: ["Pediu para remover um computador", "Pedindo para remover um computador"],
   gerir_acessos: ["Mudou quem usa o app", "Mudando quem usa o app"],
   // NOD-449: a tela Não lidos pela conversa (listar, marcar, desfazer).
   nao_lidos: ["Mexeu nos não lidos", "Mexendo nos não lidos"],

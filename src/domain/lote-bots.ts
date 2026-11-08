@@ -132,6 +132,10 @@ export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote
         // NOD-437: excluir um time é do gerir_times (que monta o card); o gerir_bots não o recebe.
         erro("excluir um time é com gerir_times");
         break;
+      case "remover_computador":
+        // ADA-245: remover um computador é do remover_computador (que monta o card); o gerir_bots não o recebe.
+        erro("remover um computador é com remover_computador");
+        break;
       case "acessos_em_lote":
       case "padrao_acesso":
       case "desfazer_acessos":

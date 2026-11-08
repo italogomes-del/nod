@@ -268,7 +268,7 @@ Para quem não usa terminal: `https://app.nodbot.ai/download/windows` responde 3
 GitHub é privada). O .exe é um instalador NSIS por usuário, sem admin, que roda **o mesmo** instalador da ADA-32 num
 PowerShell escondido, com a saída na própria janela (`scripts/windows/instalador.nsi` e `instalar-pelo-exe.ps1`),
 cria o atalho **Nod** no Menu Iniciar e na Área de Trabalho e entra em Configurações › Aplicativos com desinstalador
-(`desinstalar-pelo-exe.ps1`: tira a tarefa, o Path e a pasta; guarda a conexão). O Electron no Windows segue na Fase 3:
+(`desinstalar.ps1`, ADA-245: tira a tarefa, o Path e as pastas; com `-ManterConexao` guarda a conexão e com `-ManterIas` as IAs; em silêncio guarda as duas). O Electron no Windows segue na Fase 3:
 "Abrir o Nod" abre o Nod web com o motor desta máquina conectado.
 
 Instruções para a pessoa (3 passos):

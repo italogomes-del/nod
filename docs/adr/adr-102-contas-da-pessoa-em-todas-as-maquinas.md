@@ -112,3 +112,16 @@ leitura de contas que ela já guarda por 30 s; o filtro é um predicado a mais n
 O login de uma conta ganha o passo 1 Preparar. Na fase `preparando`, a máquina instala ou atualiza a IA (ADR-100) e só
 depois abre a página. Se esse passo falhar, o login termina com `preparo_falhou`, e o motivo vem no `preparo.atualizacao`.
 Quando o servidor é antigo e recusa `preparando` com 400, o motor manda de novo como `abrindo` e segue.
+
+## Emenda ADA-245 (2026-11-08) — remover o nod de um computador
+
+Ação nova `maquinas.remover` (pessoa_confirma, ADR-135), com rota própria (`GET /maquinas/:id/remover/previa`,
+`POST /maquinas/:id/remover`) em vez de estender o `desconectar`, e a mesma função no card do chat
+(`remover_computador`, sempre com cartão). Os bots presos ao computador soltam e seguem o padrão; se ele era o padrão,
+o próximo computador de trabalho vira o padrão (último uso, depois o mais novo; `src/domain/maquinas-remover.ts`), ou
+ninguém, e os bots esperam um computador. A escolha não olha quem está conectado agora, para a tela e o chat
+escolherem o mesmo. Sem "Continuar ligado", o computador sai da conta: na hora quando o próprio app já se limpou
+(`daqui`); ligado, a puxada leva `remover` junto de `desconectar` e a chave cai quando ele confirma; desligado, revoga
+na hora e a limpeza local fica com a pessoa. Com "Continuar ligado", a chave fica e a puxada só leva `remover`. O pedido
+para o computador desligado vive em memória por 24 h e se perde num reinício do servidor.
+Gatilho de reversão: pedido perdido em reinício virando reclamação (aí o pedido vai para o banco).

@@ -141,9 +141,9 @@ export function permitidaAPedidoDeOutraPessoa(f: Pick<FerramentaPlano, "nome" | 
 }
 
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos", "gerir_times", "gerir_acessos", "gerir_maquinas"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos", "gerir_times", "gerir_acessos", "gerir_maquinas", "remover_computador"],
   // NOD-119: o card da barra lateral só onde a pessoa olha o chat (conversa e criação). NOD-449: nao_lidos também (o card e o recibo). ADA-243: gerir_maquinas também (a máquina padrão é a pedido da pessoa).
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos", "gerir_times", "gerir_acessos", "gerir_maquinas"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos", "gerir_times", "gerir_acessos", "gerir_maquinas", "remover_computador"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "buscar_conversas", "ler_conversa"],
   // NOD-50 (revisão 6 do PR #553): rotina sem pedir_credencial — o cartão não segura a execução seguinte, que abriria outro a cada
   // disparo; a rotina que precisa de chave pede pela pessoa (pedir_a_pessoa) ou pela conversa.
@@ -321,6 +321,11 @@ export type EntradaPlano = {
    */
   contas?: boolean;
   /**
+   * ADA-245 (revisão do PR #694): NOD_ONBOARDING_TEXTO=1 (desligada por padrão). Desligada, remover_computador sai do
+   * catálogo: a jornada D inteira (tela e chat) fica atrás da flag, e um card aprovado desinstalaria o computador.
+   */
+  onboardingTexto?: boolean;
+  /**
    * NOD-442: o experimento "Quadro" da pessoa ligado. Põe gerir_quadro no catálogo de QUALQUER bot (o Nod também) na
    * conversa, na criação, na rotina e no pedido de colega (a tarefa que o quadro começou é uma delegação). Desligado,
    * a ferramenta nem aparece (o caso de uso recusa de novo).
@@ -391,6 +396,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta, ...geraQuadro, ...usaCanvas]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
+    .filter((n) => n !== "remover_computador" || entrada.onboardingTexto === true)
     // NOD-61 (revisões 2 e 3 do PR #594): pedido de outro bot (sobProcuracaoDe, herdado por frente/retomada/lote) não leva o
     // histórico. Aceito na revisão 5: o turno da conversa com responder_pedido mantém — a pessoa está ali e responde ela.
     .filter((n) => !aPedidoDeOutroBot(entrada.turno) || !FERRAMENTAS_DO_HISTORICO.includes(n))

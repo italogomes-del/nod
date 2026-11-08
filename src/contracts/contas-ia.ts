@@ -144,6 +144,8 @@ export type PuxadaDeContas = {
   desconectar: boolean;
   /** NOD-9 (definido em 2026-10-22): as IAs a atualizar pelo botão da tela; vai uma vez por pedido (o motor antigo ignora). */
   atualizar?: IaComConta[];
+  /** ADA-245: junto de `desconectar`, a pessoa removeu o nod deste computador por outro lugar: rodar a limpeza local. */
+  remover?: import("./remover-computador.ts").PedidoRemoverNaPuxada;
 };
 
 /** O progresso que a máquina relata de um login. */

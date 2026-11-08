@@ -30,7 +30,8 @@ describe("montarPlano", () => {
   });
   it("conversa: ferramentas nod do modo + conector ∩ concessão como slug__tool com nomeMcp exato", () => {
     const p = montarPlano(base);
-    for (const n of FERRAMENTAS_NOD_POR_MODO.conversa) expect(nomes(p)).toContain(n);
+    // remover_computador só com NOD_ONBOARDING_TEXTO=1 (revisão do PR #694; conta-pelo-chat.test.ts)
+    for (const n of FERRAMENTAS_NOD_POR_MODO.conversa.filter((f) => f !== "remover_computador")) expect(nomes(p)).toContain(n);
     expect(nomes(p)).toContain("exemplo__listar_contatos");
     expect(nomes(p)).toContain("exemplo__enviar_email");
     expect(p.catalogo.ferramentas.find((f) => f.nome === "exemplo__enviar_email")?.nomeMcp).toBe("mcp__nod__exemplo__enviar_email");

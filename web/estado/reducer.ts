@@ -49,6 +49,7 @@ import { lembrarComputador, MEMORIA_INICIAL, UI_INICIAL as UI_COMPUTADOR_INICIAL
 import { conversasComPergunta } from "../lib/perguntas.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
 import { UI_CONTAS_INICIAL, type UiContas } from "../telas/contas-lista.ts";
+import { UI_REMOVER_INICIAL, type UiRemover } from "../telas/remover-computador.ts";
 import { UI_NUVEM_INICIAL, type UiNuvem } from "../lib/maquina-nuvem.ts";
 import type { RascunhoInteligencia } from "../telas/inteligencia.ts";
 import { LOTE_INICIAL, soOsQueExistem, type LoteAgentes } from "../lib/lote-agentes.ts";
@@ -496,6 +497,10 @@ export type Estado = {
   contasUi: UiContas;
   /** ADR-121 (NOD-92): a conta da nuvem e o que é só da tela nela (aviso da volta do Google, formulário, menu do sono). */
   nuvem: UiNuvem;
+  /** ADA-245 (jornada D): o diálogo "Remover o nod deste computador?" e a tela de Fim. */
+  removerUi: UiRemover;
+  /** ADA-245: `ModoSessaoDto.onboardingTexto` (GET /api/sessao/modo); false = as telas de antes, sem renomear nada. */
+  onboardingTexto: boolean;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
   /** NOD-367: a lista de Feedback não carregou (a seção mostra "Tentar de novo" em vez de pedir de novo sozinha). */
@@ -655,6 +660,8 @@ export type Acao =
   | { tipo: "trocar-contas"; contas: ContasIaDto }
   | { tipo: "contas-ui"; mudanca: Partial<UiContas> }
   | { tipo: "nuvem-ui"; mudanca: Partial<UiNuvem> }
+  | { tipo: "remover-ui"; mudanca: Partial<UiRemover> }
+  | { tipo: "onboarding-texto"; ligado: boolean }
   | { tipo: "hidratar-relatos"; relatos: Relato[] | null; erro?: boolean }
   | { tipo: "modo-dev"; ligado: boolean }
   | { tipo: "hidratar-raio-x"; conversaId: string; raioX: RaioXConversa }
@@ -764,6 +771,8 @@ export const estadoInicial: Estado = {
   detalhesContas: null,
   contasUi: UI_CONTAS_INICIAL,
   nuvem: UI_NUVEM_INICIAL,
+  removerUi: UI_REMOVER_INICIAL,
+  onboardingTexto: false,
   relatos: null,
   agenda: AGENDA_INICIAL,
   modoDev: { ligado: false, raioX: {} },
@@ -1940,6 +1949,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, contasUi: { ...estado.contasUi, ...acao.mudanca } };
     case "nuvem-ui":
       return { ...estado, nuvem: { ...estado.nuvem, ...acao.mudanca } };
+    case "remover-ui":
+      return { ...estado, removerUi: { ...estado.removerUi, ...acao.mudanca } };
+    case "onboarding-texto":
+      return estado.onboardingTexto === acao.ligado ? estado : { ...estado, onboardingTexto: acao.ligado };
     case "hidratar-relatos":
       return { ...estado, relatos: acao.relatos, relatosErro: acao.erro === true };
     // Desligado, os resumos saem da memória: religar busca de novo, com o que mudou nesse meio-tempo.

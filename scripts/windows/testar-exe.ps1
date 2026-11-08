@@ -105,6 +105,8 @@ try {
   }
   Exigir ($null -eq [Environment]::GetEnvironmentVariable('NOD_INSTALADO_EM', 'User')) 'sobrou NOD_INSTALADO_EM'
   if ($tinhaConexao) { Exigir (Test-Path -LiteralPath $conexao) 'a desinstalacao apagou a conexao' }
+  # ADA-245: os dados do motor saem junto (o /S mantem a conexao e as IAs, como antes).
+  Exigir (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'nod-motor'))) 'sobrou %LOCALAPPDATA%\nod-motor'
   Write-Output 'desinstalacao conferida'
 
   Write-Output '== 4. instalacao pela janela'

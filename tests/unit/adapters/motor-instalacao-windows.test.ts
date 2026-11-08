@@ -3,6 +3,7 @@ import { ARQUIVOS_DO_MOTOR } from "../../../src/domain/atualizacao-do-motor.ts";
 import { PISO_CLI } from "../../../src/adapters/executor/flag-floors.ts";
 import { NODE_DO_MOTOR } from "../../../src/adapters/http/motor-instalacao.ts";
 import { scriptDeInstalacaoWindows, servidorDoWindowsValido, TAREFA_DO_MOTOR_WINDOWS } from "../../../src/adapters/http/motor-instalacao-windows.ts";
+import { caminhosNoWindows, IAS_DO_NPM, lerMarcaDasIas } from "../../../motor/desinstalar.ts";
 
 /** ADR-151 (ADA-32): o PowerShell que `irm https://<nod>/windows | iex` roda. */
 describe("script de instalação do motor no Windows (ADR-151)", () => {
@@ -96,5 +97,28 @@ describe("script de instalação do motor no Windows (ADR-151)", () => {
     expect(script).toContain("$cn -cne 'Johannes Schindelin'");
     expect(script).toContain("https://github.com/git-for-windows/git/releases/download/");
     expect(script).toMatch(/\$assinatura\.Status -ne 'Valid'/);
+  });
+
+  it("ADA-245: marca em ias-do-nod.json só a IA que o npm do nod instalou e que não existia antes", () => {
+    // O mesmo arquivo e as mesmas chaves que o `nod-motor desinstalar` lê (motor/desinstalar.ts).
+    const c = caminhosNoWindows({ LOCALAPPDATA: "C:\\U\\AppData\\Local", APPDATA: "C:\\U\\AppData\\Roaming" })!;
+    expect(c.marca).toBe("C:\\U\\AppData\\Roaming\\nod-motor\\ias-do-nod.json");
+    expect(script).toContain("$MarcaDasIas = Join-Path (Join-Path $env:APPDATA 'nod-motor') 'ias-do-nod.json'");
+    expect(Object.keys(IAS_DO_NPM).sort()).toEqual(["claude", "codex"]);
+    expect(script).toContain("InstalarIa '@anthropic-ai/claude-code' 'claude'");
+    expect(script).toContain("InstalarIa '@openai/codex' 'codex'");
+    const instalar = script.slice(script.indexOf("function InstalarIa("), script.indexOf("function InstalarIas"));
+    // Só depois do npm install e só sem versão antes (a IA que já era da pessoa nunca entra na marca).
+    expect(instalar).toContain("if (-not $antes) { MarcarIaDoNod $Binario $PastaNpm }");
+    expect(instalar.indexOf("MarcarIaDoNod")).toBeGreaterThan(instalar.indexOf("'install', '-g'"));
+    expect(instalar.indexOf("{ Passo ($Nome + ' ' + $antes); return $true }")).toBeLessThan(instalar.indexOf("MarcarIaDoNod"));
+    const marcar = script.slice(script.indexOf("function MarcarIaDoNod"), script.indexOf("function InstalarIa("));
+    // Só com o shim no prefixo do nod; junta com a marca que já havia; uma falha só vai ao log (nunca derruba a instalação).
+    expect(marcar).toContain("if (-not (Test-Path -LiteralPath $shim)) { return }");
+    expect(marcar).toContain("foreach ($p in $lida.PSObject.Properties) { $marca[$p.Name] = $p.Value }");
+    expect(marcar).toContain("[IO.File]::WriteAllText($MarcaDasIas, ($marca | ConvertTo-Json -Compress))");
+    expect(marcar).toMatch(/\} catch \{ Registrar/);
+    // A forma que o PowerShell grava é a que o desinstalar entende (versão string; 'sim' quando o --version falha).
+    expect(lerMarcaDasIas('{"claude":"2.1.3","codex":"sim"}')).toEqual(["claude", "codex"]);
   });
 });

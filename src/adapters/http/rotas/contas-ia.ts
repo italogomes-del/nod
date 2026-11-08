@@ -12,6 +12,8 @@ import type { Deps } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
 import { revogarChaveMaquina } from "../../../use-cases/chaves-maquina.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
+import { previaDeRemover, removerComputador } from "../../../use-cases/acoes/maquinas.ts";
+import type { ResultadoRemoverDto } from "../../../contracts/remover-computador.ts";
 
 /**
  * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102): a lista única de Provedores de IA, a
@@ -28,11 +30,20 @@ export type DepsRotasContas = {
   avisar(escopo: Escopo, motivo: string, loginId?: string): void;
   /** A máquina está conectada agora (a ponte a ouviu no último minuto)? */
   maquinaViva(escopo: Escopo, id: string): boolean;
+  /** ADA-245: a plataforma do computador ligado agora (o diálogo de remover escolhe o texto do Windows ou do Mac). */
+  plataformaDaMaquina?(escopo: Escopo, id: string): string | null;
   /** NOD-9 (2026-10-23): a máquina conectada anunciou que atende o "Atualizar agora" remoto (o motor da VM). */
   maquinaAtualizaIas?(escopo: Escopo, id: string): boolean;
   /** A conexão viva da máquina passa a usar o nome novo (o prompt e "Rodar no X"). */
   aoRenomear?(escopo: Escopo, id: string, nome: string): void;
+  /** ADA-245 (revisão do PR #694): NOD_ONBOARDING_TEXTO=1. Desligada, a prévia e o remover dão 404 (a jornada D é da flag). */
+  onboardingTexto?: boolean;
 };
+
+/** A jornada D (remover o computador) só existe com a flag ligada: desligada, a rota responde como se não existisse. */
+function exigirJornadaD(deps: DepsRotasContas): void {
+  if (deps.onboardingTexto !== true) throw new ErroDeDominio("nao_encontrado", { cause: "remover computador desligado" });
+}
 
 /** A máquina existe, é da pessoa e não foi revogada. */
 async function exigirMaquina(d: Deps, id: string | undefined): Promise<{ id: string; nome: string }> {
@@ -289,6 +300,39 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
         log("info", "maquina_desconectada", { pessoa_id: ctx.escopo.pessoaId, maquina_id: id, sair_das_contas: sair, no_ar: viva, contas: r.contas });
         deps.avisar(ctx.escopo, "maquina");
         ctx.json(202, { ok: true, contas: r.contas, aguardandoMaquina: sair && viva });
+      },
+    },
+    {
+      // ADA-245 (jornada D): o que o diálogo "Remover o nod deste computador" mostra antes — os bots de lá e quem assume.
+      metodo: "GET",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/remover\/previa$/,
+      async handler(ctx) {
+        exigirJornadaD(deps);
+        const id = assertUuid(ctx.params.id, "máquina");
+        const viva = deps.maquinaViva(ctx.escopo, id);
+        const plataforma = deps.plataformaDaMaquina?.(ctx.escopo, id) ?? null;
+        ctx.json(200, await deps.dentro(ctx.escopo, (d) => previaDeRemover(d, id, viva, plataforma)));
+      },
+    },
+    {
+      // ADA-245: o executor único (o card do chat chama o mesmo). `daqui` = o app deste computador já se limpou (a ponte
+      // removerDaqui roda ANTES, com a conexão ainda valendo): a chave cai agora e não vai pedido na puxada.
+      metodo: "POST", acao: "maquinas.remover",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/remover$/,
+      async handler(ctx) {
+        exigirJornadaD(deps);
+        const corpo = ((await ctx.corpo()) ?? {}) as { manterIas?: unknown; manterConexao?: unknown; daqui?: unknown };
+        if (typeof corpo.manterIas !== "boolean" || typeof corpo.manterConexao !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "manterIas e manterConexao" });
+        const id = assertUuid(ctx.params.id, "máquina");
+        const daqui = corpo.daqui === true;
+        const viva = deps.maquinaViva(ctx.escopo, id);
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, removerComputador, { maquinaId: id, manterIas: corpo.manterIas as boolean, manterConexao: corpo.manterConexao as boolean, daqui }));
+        // O mesmo critério do efeito depois do commit (compor.ts, removerDepoisDoCommit): ligado, a limpeza vai na puxada;
+        // desligado com "Continuar ligado", o pedido espera ele ligar; desligado saindo da conta, a chave cai e nada se limpa.
+        const dto: ResultadoRemoverDto = { ...r, aguardandoComputador: !daqui && deps.compartilhado && (viva || (corpo.manterConexao as boolean)) };
+        log("info", "computador_remover", { pessoa_id: ctx.escopo.pessoaId, maquina_id: id, daqui, no_ar: viva, bots: dto.bots.length, saiu_da_conta: dto.saiuDaConta });
+        deps.avisar(ctx.escopo, "maquina");
+        ctx.json(200, dto);
       },
     },
     {

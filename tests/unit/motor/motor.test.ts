@@ -24,6 +24,10 @@ describe("motor sem janela (ADR-090)", () => {
     expect(lerComando(["entrar", "gemini"]).tipo).toBe("ajuda");
     expect(lerComando(["--help"])).toEqual({ tipo: "ajuda", erro: null });
     expect(lerComando(["xyz"])).toMatchObject({ tipo: "ajuda", erro: expect.stringContaining("xyz") });
+    // ADA-245 (jornada D): a remoção deste computador.
+    expect(lerComando(["desinstalar"])).toEqual({ tipo: "desinstalar", manterConexao: false, manterIas: false, json: false });
+    expect(lerComando(["desinstalar", "--manter-ias", "--json", "--manter-conexao"])).toEqual({ tipo: "desinstalar", manterConexao: true, manterIas: true, json: true });
+    expect(lerComando(["desinstalar", "--tudo"])).toMatchObject({ tipo: "ajuda", erro: expect.stringContaining("--tudo") });
   });
 
   it("o login headless de cada IA (o Codex e o gh pelo fluxo de dispositivo)", () => {
@@ -190,5 +194,23 @@ describe("motor sem janela (ADR-090)", () => {
       expect(fonte, arquivo).toMatch(/anunciar: async[^\n]*\n?[^]*?ponte\.anunciarInventario\(/);
       expect(fonte, arquivo).not.toMatch(/ponteHttp\.ponte\.conectar\(/);
     }
+  });
+
+  // Regression: inverter o manterConexao do desconectar(remover) do motor/main.ts passava em todos os testes, e o
+  // "Continuar ligado" pedido pelo chat ou por outra tela apagaria a conexão.json (critério 2 da jornada D).
+  // Found by /qa on 2026-11-08 (PR #694)
+  it("QA ADA-245: o motor removido pela puxada só apaga a conexão sem 'Continuar ligado', e a limpeza leva as opções", async () => {
+    const fonte = await readFile(join(process.cwd(), "motor/main.ts"), "utf8");
+    const i = fonte.indexOf("desconectar: async (remover?: OpcoesRemover) => {");
+    expect(i).toBeGreaterThan(0);
+    const corpo = fonte.slice(i, fonte.indexOf("aoSairDaConta:", i));
+    const apagam = corpo.match(/^.*rm\(arquivoDaConexao\(pasta\).*$/gm) ?? [];
+    expect(apagam.map((l) => l.trim())).toEqual([
+      "await rm(arquivoDaConexao(pasta), { force: true });",
+      "if (!remover.manterConexao) await rm(arquivoDaConexao(pasta), { force: true }).catch(() => undefined);",
+    ]);
+    // O primeiro é o desconectar sem remoção (sai da conta de todo jeito).
+    expect(corpo.indexOf("if (!remover) {")).toBeLessThan(corpo.indexOf(apagam[0]!.trim()));
+    expect(corpo).toContain("await desinstalar(remover, depsDeVerdade({ modo: \"servico\", pastaDaConexao: pasta }))");
   });
 });

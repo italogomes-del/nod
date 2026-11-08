@@ -87,6 +87,13 @@ describe("validarLote (ADR-082)", () => {
     }
   });
 
+  it("ADA-245 (merge com a ADA-241): remover_computador pelo gerir_bots recusa com UM motivo só, apontando o remover_computador", () => {
+    // O merge deixou o case cair no dos acessos (sem break): saíam dois motivos, o segundo mandando para o gerir_acessos.
+    const r = valida([{ tipo: "remover_computador", maquina_id: "m1" } as unknown as AcaoLote]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problemas.map((p) => p.motivo)).toEqual(["remover um computador é com remover_computador"]);
+  });
+
   it("mais de 20 ações, ou nenhuma, recusa", () => {
     const muitas = Array.from({ length: 21 }, (): AcaoLote => ({ tipo: "excluir", bot: "Dev 1" }));
     expect(valida(muitas).ok).toBe(false);

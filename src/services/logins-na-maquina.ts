@@ -1,3 +1,4 @@
+import type { OpcoesRemover } from "../contracts/remover-computador.ts";
 import { randomUUID } from "node:crypto";
 import type { CodigoCifrado, FaseLogin, IaComConta, LoginNaMaquina, LoginPendente, ProgressoDoLogin } from "../contracts/contas-ia.ts";
 import { FASES_LOGIN_FINAIS } from "../contracts/contas-ia.ts";
@@ -35,6 +36,11 @@ export const PRAZO_DESCONEXAO_MS = 2 * 60_000;
  * máquina puxa a cada 3 s; passado o prazo o pedido some, e a tela mostra de novo o botão pelo anúncio.
  */
 export const PRAZO_PEDIDO_ATUALIZAR_MS = 2 * 60_000;
+/**
+ * ADA-245: quanto vale o pedido de remover o nod de um computador removido por outro lugar (outra tela, o chat) que fica
+ * ligado à conta: ele se limpa quando voltar a puxar. Em memória, como o resto: some num reinício do servidor.
+ */
+export const PRAZO_REMOCAO_MS = 24 * 60 * 60_000;
 /** O texto cifrado é pequeno (o código do Claude tem até 2048 caracteres): 8 KB de folga. */
 const MAX_CIFRADO = 8_192;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -60,6 +66,11 @@ export interface LoginsNaMaquina {
   pedirDesconexao(escopo: Escopo, maquinaId: string): void;
   desconexaoPedida(escopo: Escopo, maquinaId: string): boolean;
   concluirDesconexao(escopo: Escopo, maquinaId: string): boolean;
+  /** ADA-245: "Remover o nod" deste computador por outro lugar: a próxima puxada leva `remover` (e `desconectar`). */
+  pedirRemocao(escopo: Escopo, maquinaId: string, opcoes: OpcoesRemover, prazoMs?: number): void;
+  remocaoPedida(escopo: Escopo, maquinaId: string): OpcoesRemover | null;
+  /** O computador confirmou a limpeza: o pedido sai e volta (null = não havia). */
+  concluirRemocao(escopo: Escopo, maquinaId: string): OpcoesRemover | null;
   /** NOD-9: o botão "Atualizar" de uma IA numa máquina (a VM): a próxima puxada leva `atualizar: [ia]`. */
   pedirAtualizacao(escopo: Escopo, maquinaId: string, ia: IaComConta): void;
   /** As IAs com pedido de atualizar nesta máquina; cada pedido sai UMA vez (a puxada o consome). */
@@ -78,6 +89,7 @@ export function cifradoValido(v: unknown): CodigoCifrado | null {
 export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMaquina {
   const logins = new Map<string, Login>();
   const desconexoes = new Map<string, number>();
+  const remocoes = new Map<string, { opcoes: OpcoesRemover; ate: number }>();
   /** chaveMaquina → IA → até quando o pedido vale. */
   const atualizacoes = new Map<string, Map<IaComConta, number>>();
   const chaveMaquina = (escopo: Escopo, maquinaId: string) => `${escopo.tenantId}:${escopo.pessoaId}:${maquinaId}`;
@@ -202,6 +214,23 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
     },
     concluirDesconexao(escopo, maquinaId) {
       return desconexoes.delete(chaveMaquina(escopo, maquinaId));
+    },
+    pedirRemocao(escopo, maquinaId, opcoes, prazoMs = PRAZO_DESCONEXAO_MS) {
+      const t = agora();
+      for (const [k, r] of remocoes) if (r.ate <= t) remocoes.delete(k);
+      remocoes.set(chaveMaquina(escopo, maquinaId), { opcoes: { manterIas: opcoes.manterIas, manterConexao: opcoes.manterConexao }, ate: t + prazoMs });
+    },
+    remocaoPedida(escopo, maquinaId) {
+      const k = chaveMaquina(escopo, maquinaId);
+      const r = remocoes.get(k);
+      if (r && r.ate <= agora()) remocoes.delete(k);
+      return r && r.ate > agora() ? r.opcoes : null;
+    },
+    concluirRemocao(escopo, maquinaId) {
+      const k = chaveMaquina(escopo, maquinaId);
+      const r = remocoes.get(k);
+      remocoes.delete(k);
+      return r && r.ate > agora() ? r.opcoes : null;
     },
     pedirAtualizacao(escopo, maquinaId, ia) {
       // Devolução do #501 (2026-10-23): a máquina que nunca mais puxou deixava o pedido no mapa para sempre — cada

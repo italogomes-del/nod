@@ -82,6 +82,8 @@ export type EntradaEmitirPlano = {
   semCriarBots?: boolean;
   /** NOD-351: NOD_CONTAS=1 (as contas ligadas) põe abrir_conta no catálogo da conversa, da criação e da sala. */
   contas?: boolean;
+  /** ADA-245: NOD_ONBOARDING_TEXTO=1 põe remover_computador no catálogo (desligada, ele não aparece). */
+  onboardingTexto?: boolean;
   /** ADR-090: nome e plataforma da máquina do turno, do anúncio dela (só no modo compartilhado). Ausente = Mac. */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
   /**
@@ -512,6 +514,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     semFerramentasDoNod: input.semFerramentasDoNod === true,
     semCriarBots: input.semCriarBots === true,
     contas: input.contas === true,
+    onboardingTexto: input.onboardingTexto === true,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).

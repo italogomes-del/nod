@@ -33,9 +33,13 @@ describe("QA #678: o IPC só atende a tela de conexão", () => {
     const contaDaJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.(?:desafioConta|trocarConta|google\w+|esteComputador\w+|estaMaquina), (?:async )?\(e(?:, (?:url|codigo): unknown)?\) => (?:\{ if \(!?daJanela\(e\)\)|\(daJanela\(e\) \?)/g) ?? [];
     expect(contaDaJanela).toHaveLength(8); // ADA-243: + estaMaquina
     expect(main).toMatch(/const daJanela = \(e: IpcMainInvokeEvent\) => daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\);/);
-    expect(handles).toBeGreaterThanOrEqual(7);
-    expect(guardados.length + daJanela.length + contaDaJanela.length).toBe(handles);
+    // ADA-245: os canais do "Remover o nod deste computador" passam pela mesma guarda da janela, antes de tudo.
+    const doRemover = main.match(/ipcMain\.handle\(CANAIS_REMOVER\.\w+, (?:async )?\(e(?:, opcoes: unknown)?\)(?:: (?:Promise<[^>]+>|boolean))? => \{\s*if \(!daJanela\(e\)\) throw new Error\("origem_invalida"\);/g) ?? [];
+    expect(doRemover).toHaveLength(2); // removerDaqui e fecharAposRemover (o estaMaquina é o da ADA-243)
+    expect(handles).toBeGreaterThanOrEqual(10);
+    expect(guardados.length + daJanela.length + contaDaJanela.length + doRemover.length).toBe(handles);
     expect(daJanela).toHaveLength(2);
+    expect(main).toMatch(/const daJanela = \(e: IpcMainInvokeEvent\) => daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\);/);
     expect(main).toMatch(/const iaDaJanela = \(e: IpcMainInvokeEvent, ia: unknown\) => \(daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\) \? lerIaDesktop\(ia\) : null\);/);
     expect(main).toMatch(/preload: join\(dir, "preload-web-windows\.cjs"\)/);
     expect(main).toMatch(/const daTelaDeSetup = \(e: IpcMainInvokeEvent\) => daTelaDeSetupPura\(e, setup, setupUrl\);/);
@@ -96,7 +100,8 @@ describe("QA #678: o cookie da sessão na partition nod-web", () => {
 describe("QA #678: o vigia a cada 30 s religa pela tarefa", () => {
   it("o intervalo é 30 s e o main o usa", () => {
     expect(INTERVALO_DO_VIGIA_MS).toBe(30_000);
-    expect(main).toMatch(/setInterval\(\(\) => \{ if \(conexao\) void lerMotor\(\); \}, INTERVALO_DO_VIGIA_MS\)/);
+    // ADA-245: depois do "Remover o nod deste computador" o vigia para (senão religaria a tarefa removida).
+    expect(main).toMatch(/setInterval\(\(\) => \{ if \(conexao && !removido\) void lerMotor\(\); \}, INTERVALO_DO_VIGIA_MS\)/);
   });
   it("vigiar: estado e religar a partir da saída do PowerShell", () => {
     expect(vigiar('{"tarefa":"Ready","processos":0,"instalado":true}')).toEqual({ estado: "parado", religar: true, tarefa: "Ready" });

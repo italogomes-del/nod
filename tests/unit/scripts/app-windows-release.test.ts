@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { lerComando } from "../../../motor/conexao.ts";
 
 const ler = (c: string) => readFileSync(new URL(`../../../${c}`, import.meta.url), "utf8");
 
@@ -49,5 +50,46 @@ describe("ADA-229: release e CI", () => {
   });
   it("o testar-app.ps1 é ASCII (o Windows PowerShell 5.1 lê sem BOM como ANSI)", () => {
     expect([...ler("scripts/windows/testar-app.ps1")].every((c) => c.charCodeAt(0) < 128)).toBe(true);
+  });
+});
+
+// ADA-245 (jornada D): o desinstalador do app também remove o motor, pelo `nod-motor desinstalar`.
+describe("ADA-245: desinstalar o app do Windows", () => {
+  const cfg = ler("electron-builder-windows.yml");
+  const nsh = ler("scripts/windows/app-desinstalar.nsh");
+  const macro = nsh.slice(nsh.indexOf("!macro customUnInstall"), nsh.indexOf("!macroend", nsh.indexOf("!macro customUnInstall")));
+  it("o NSIS do electron-builder inclui o app-desinstalar.nsh, que define o customUnInstall", () => {
+    expect(cfg).toMatch(/^nsis:\n(?: {2}.*\n)*? {2}include: scripts\/windows\/app-desinstalar\.nsh$/m);
+    expect(macro).not.toBe("");
+  });
+  it("não roda na atualização (--updated) nem quando o motor já saiu", () => {
+    expect(macro).toMatch(/\$\{IfNot\} \$\{isUpdated\}\n\s+\$\{AndIf\} \$\{FileExists\} "\$LOCALAPPDATA\\nod\\node\\node\.exe"\n\s+\$\{AndIf\} \$\{FileExists\} "\$LOCALAPPDATA\\nod\\motor\\app\\nod-motor\.mjs"/);
+  });
+  it("roda o nod-motor desinstalar com as opções que o motor aceita", () => {
+    expect(macro).toContain(`nsExec::ExecToLog '"$LOCALAPPDATA\\nod\\node\\node.exe" "$LOCALAPPDATA\\nod\\motor\\app\\nod-motor.mjs" desinstalar$NodOpcoes'`);
+    const opcoes = [...macro.matchAll(/StrCpy \$NodOpcoes "\$NodOpcoes (--[a-z-]+)"/g)].map((m) => m[1]!);
+    expect(new Set(opcoes)).toEqual(new Set(["--manter-ias", "--manter-conexao"]));
+    expect(lerComando(["desinstalar", ...new Set(opcoes)])).toEqual({ tipo: "desinstalar", manterIas: true, manterConexao: true, json: false });
+  });
+  it("/MANTERIAS e /MANTERCONEXAO (e o /S) respondem sem perguntar; a pergunta sem resposta guarda", () => {
+    expect(macro).toContain('!insertmacro NodTemOpcao "/MANTERIAS"');
+    expect(macro).toContain('!insertmacro NodTemOpcao "/MANTERCONEXAO"');
+    expect(macro).toMatch(/!insertmacro NodTemOpcao "\/S"\n\s+StrCpy \$R7 \$R2/);
+    // Sem /SD: o desinstalador de 1 clique fica silencioso; o salto só acontece com a resposta que tira algo.
+    expect(macro).toMatch(/Tirar também o Claude e o ChatGPT[^\n]*" IDYES \+2\n\s+StrCpy \$NodOpcoes "\$NodOpcoes --manter-ias"/);
+    expect(macro).toMatch(/Continuar ligado à sua conta\?[^\n]*" IDNO \+2\n\s+StrCpy \$NodOpcoes "\$NodOpcoes --manter-conexao"/);
+    expect(macro).not.toContain("/SD");
+  });
+  it("revisão do PR #694: motor de antes da ADA-245 (sem `desinstalar`) ou falha: roda a limpeza em PowerShell que vai dentro do desinstalador", () => {
+    const depois = macro.slice(macro.indexOf("Pop $R8"));
+    expect(depois).toMatch(/\$\{If\} \$R8 != "0"/);
+    expect(depois).toContain('File "/oname=$PLUGINSDIR\\desinstalar.ps1" "${PROJECT_DIR}\\scripts\\windows\\desinstalar.ps1"');
+    expect(depois).toContain(`nsExec::ExecToLog '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\\desinstalar.ps1"$R9'`);
+    // As mesmas escolhas, no vocabulário do desinstalar.ps1 (param -ManterIas / -ManterConexao).
+    expect(depois).toMatch(/!insertmacro NodTemOpcao "--manter-ias"\n\s+\$\{If\} \$R2 == "1"\n\s+StrCpy \$R9 "\$R9 -ManterIas"/);
+    expect(depois).toMatch(/!insertmacro NodTemOpcao "--manter-conexao"\n\s+\$\{If\} \$R2 == "1"\n\s+StrCpy \$R9 "\$R9 -ManterConexao"/);
+    const ps1 = ler("scripts/windows/desinstalar.ps1");
+    expect(ps1).toMatch(/\[switch\]\$ManterConexao/);
+    expect(ps1).toMatch(/\[switch\]\$ManterIas/);
   });
 });

@@ -9,7 +9,8 @@
  *     └─ Claude Code e Codex pelo npm do Node do nod ── motor (sha256 do manifesto, troca atômica)
  *     └─ nod.cmd / nod-motor.cmd ── Tarefa Agendada no login (ou a chave Run) ── pareamento (abre o navegador) ── no ar
  *
- * Rodar de novo atualiza e nunca toca a conexão (`%APPDATA%\nod-motor\conexao.json`). O texto inteiro é um bloco
+ * Rodar de novo atualiza e nunca toca a conexão (`%APPDATA%\nod-motor\conexao.json`). ADA-245: as IAs que o npm do nod
+ * instalou (e que não existiam antes) entram na marca `%APPDATA%\nod-motor\ias-do-nod.json`, lida pelo `nod-motor desinstalar`. O texto inteiro é um bloco
  * `& { … }` invocado na última linha: se o download cortar no meio, o PowerShell recusa o parse e nada roda pela
  * metade. O script nunca chama `exit` (fecharia a janela de quem colou o comando). Todo valor do servidor entra entre
  * aspas simples (o PowerShell não expande nada nelas) e é validado antes: nenhum tem aspas simples.
@@ -75,6 +76,7 @@ $MotorMjs = Join-Path $App 'nod-motor.mjs'
 $PastaBin = Join-Path $Pasta 'bin'
 $PastaNpm = Join-Path $env:APPDATA 'npm'
 $Conexao = Join-Path (Join-Path $env:APPDATA 'nod-motor') 'conexao.json'
+$MarcaDasIas = Join-Path (Join-Path $env:APPDATA 'nod-motor') 'ias-do-nod.json'
 $Log = Join-Path $Pasta 'instalador.log'
 $ChaveRun = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $Conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
@@ -362,6 +364,26 @@ function VersaoDoBinario([string]$Nome) {
   return VersaoDe (SaidaDe $c.Source @('--version'))
 }
 
+# ADA-245: a marca das IAs que o nod instalou (%APPDATA%\nod-motor\ias-do-nod.json, {"claude":"2.1.3"}). So quando a IA
+# nao existia antes e o npm do nod deixou o shim no prefixo: a IA que ja era da pessoa nunca entra, e o
+# nod-motor desinstalar so tira do %APPDATA%\npm o que esta marcado. Rodar de novo nao perde uma marca antiga.
+function MarcarIaDoNod([string]$Binario, [string]$Prefixo) {
+  try {
+    $shim = Join-Path $Prefixo ($Binario + '.cmd')
+    if (-not (Test-Path -LiteralPath $shim)) { return }
+    $versao = VersaoDe (SaidaDe $shim @('--version'))
+    $marca = @{}
+    if (Test-Path -LiteralPath $MarcaDasIas) {
+      $lida = Get-Content -LiteralPath $MarcaDasIas -Raw | ConvertFrom-Json
+      foreach ($p in $lida.PSObject.Properties) { $marca[$p.Name] = $p.Value }
+    }
+    $marca[$Binario] = if ($versao) { [string]$versao } else { 'sim' }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $MarcaDasIas) -Force | Out-Null
+    [IO.File]::WriteAllText($MarcaDasIas, ($marca | ConvertTo-Json -Compress))
+    Registrar ('marca: ' + $Binario + ' instalado pelo nod')
+  } catch { Registrar ('marca das IAs: ' + $_.Exception.Message) }
+}
+
 # O npm do Node do nod, chamado pelo node (e nao pelo npm.cmd: o cmd.exe leria o >= do pacote como redirecionamento).
 function InstalarIa([string]$Pacote, [string]$Binario, [string]$Piso, [string]$Nome) {
   $antes = VersaoDoBinario $Binario
@@ -369,6 +391,7 @@ function InstalarIa([string]$Pacote, [string]$Binario, [string]$Piso, [string]$N
   Write-Host ('Instalando o ' + $Nome + '...')
   $npm = Join-Path $PastaNode 'node_modules\npm\bin\npm-cli.js'
   $r = Rodar $NodeExe @($npm, 'install', '-g', '--prefix', $PastaNpm, '--no-fund', '--no-audit', '--loglevel=error', ($Pacote + '@>=' + $Piso))
+  if (-not $antes) { MarcarIaDoNod $Binario $PastaNpm }
   $depois = VersaoDoBinario $Binario
   if ($depois -and $depois -ge [version]$Piso) { Passo ($Nome + ' ' + $depois); return $true }
   # Uma versao velha antes no Path (ex.: o instalador nativo em ~\.local\bin) esconderia a que acabou de instalar no

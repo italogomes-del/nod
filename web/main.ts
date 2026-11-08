@@ -152,6 +152,7 @@ import { diaParaFocarNoMes } from "./telas/agenda-rotinas.ts";
 import { confirmarCriarBot, criarRapido } from "./telas/confirmar-criar-bot.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, lerEstaMaquina, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
+import { appEncerraNoFim, ITEM_PONTE_FALHOU, itensDaPonte, itensDoServidor, textoDeRemover, type ItemDoFim } from "./telas/remover-computador.ts";
 import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
 import type { DormirAposMin, TamanhoMaquinaNuvem } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
@@ -3681,6 +3682,8 @@ const LIMITE_PROVISORIO = "Muitos espaços novos foram abertos desta rede agora.
 /** NOD-345: com sessão, o que as contas dizem (o menu, o lembrete, o cartão que ficou aberto, a volta do Google). */
 async function lerContas(volta: string | null): Promise<void> {
   const modo = entrada.modo ?? (await sessaoApi.modo().catch(() => null));
+  // ADA-245: o texto do onboarding (Computadores, remover deste computador); sem a flag, as telas de antes.
+  dispatch({ tipo: "onboarding-texto", ligado: modo?.onboardingTexto === true });
   contas = modo?.contas ?? null;
   loginGoogle = modo?.modo === "google";
   // NOD-406 (revisões r5/r6): o pedido "Conectar este Mac?" espera saber quem é a sessão. Sem contas ligadas, abre como
@@ -5243,6 +5246,9 @@ let criarAbertoPor: string | null = null;
 /** O ⋯ que abriu o diálogo aberto agora (o foco volta para ele ao fechar; revisão do PR #306). */
 function gatilhoDoDialogo(): string | null {
   const u = estado.contasUi;
+  // ADA-245: o "Remover o nod deste computador?" abre do "…" da linha; o foco volta para ele.
+  const rm = estado.removerUi.dialogo;
+  if (rm) return `[data-act="maq-menu"][data-maquina="${CSS.escape(rm.previa.id)}"]`;
   if (u.confirmar) return `[data-act="cl-menu"][data-id="${CSS.escape(u.confirmar.contaId)}"]`;
   if (u.desconectar) return `[data-act="maq-menu"][data-maquina="${CSS.escape(u.desconectar.maquinaId)}"]`;
   // Revisão NOD-92 (item 16): o excluir abre do ⋯ da máquina ou do "Excluir" da VM que falhou ao ser criada.
@@ -6889,6 +6895,70 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (alvo) { alvo.tabIndex = -1; alvo.focus(); } else document.querySelector<HTMLElement>(`#espaco [data-act="maq-menu"][data-maquina="${CSS.escape(linha)}"]`)?.focus();
   },
   "maq-renomear-fechar": () => dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: null } }),
+  // ADA-245 (prancha D1): "Tornar padrão" no "…", o mesmo PUT do seletor "Computador padrão".
+  "maq-tornar-padrao": (el) => agir(async () => {
+    const id = el.dataset.maquina ?? "";
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    focarGatilho(`[data-act="maq-menu"][data-maquina="${CSS.escape(id)}"]`);
+    await api!.maquinaPadrao(id || null);
+    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
+  }),
+  // ADA-245 (jornada D): o diálogo (D2) abre com a prévia do servidor; "aqui" = o computador em que o app roda.
+  "rm-abrir": (el) => agir(async () => {
+    const id = el.dataset.maquina ?? "";
+    const menu = `[data-act="maq-menu"][data-maquina="${CSS.escape(id)}"]`;
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    focarGatilho(menu);
+    // A ponte da ADA-243 (estaMaquina) devolve a máquina conferida; aqui só importa o id. Relida na hora, não do estado.
+    const daqui = window.nodDesktop?.estaMaquina ? window.nodDesktop.estaMaquina().then((v) => lerEstaMaquina(v)?.id ?? null, () => null) : Promise.resolve(null);
+    const [previa, esta] = await Promise.all([api!.previaRemover(id), daqui]);
+    dispatch({ tipo: "remover-ui", mudanca: { dialogo: { previa, aqui: esta === id, manterIas: false, manterConexao: false, enviando: false, erro: null }, fim: null } });
+    focarNovo();
+  }),
+  "rm-fechar": () => {
+    if (estado.removerUi.dialogo?.enviando) return;
+    const volta = gatilhoDoDialogo();
+    dispatch({ tipo: "remover-ui", mudanca: { dialogo: null } });
+    focarGatilho(volta);
+  },
+  // O POST no servidor e, neste computador, a limpeza pela ponte do app; a tela de Fim (D3) mostra o que aconteceu.
+  "rm-confirmar": async () => {
+    const d = estado.removerUi.dialogo;
+    if (!d || d.enviando || !api) return;
+    const opcoes = { manterIas: d.manterIas, manterConexao: d.manterConexao };
+    dispatch({ tipo: "remover-ui", mudanca: { dialogo: { ...d, enviando: true, erro: null } } });
+    // Neste computador a limpeza vem ANTES (ADA-245): o motor ainda roda e sabe se apagar; depois o servidor revoga na
+    // hora (`daqui`). Se a limpeza falhar, o servidor segue sem `daqui` e a puxada tenta de novo.
+    const ponte = window.nodDesktop;
+    let daPonte: ItemDoFim[] | null = null;
+    let ponteFalhou = false;
+    if (d.aqui && ponte?.removerDaqui) {
+      try {
+        daPonte = itensDaPonte((await ponte.removerDaqui(opcoes)).itens);
+      } catch {
+        ponteFalhou = true;
+      }
+    }
+    let r;
+    try {
+      r = await api.removerComputador(d.previa.id, opcoes, daPonte !== null);
+    } catch {
+      dispatch({ tipo: "remover-ui", mudanca: { dialogo: { ...d, enviando: false, erro: "Não deu para remover agora. Confira a internet e tente de novo." } } });
+      focarNovo();
+      return;
+    }
+    const itens: ItemDoFim[] = daPonte ?? (ponteFalhou ? [...itensDoServidor(r, { online: d.previa.online, opcoes }).slice(1), ITEM_PONTE_FALHOU] : itensDoServidor(r, { online: d.previa.online, opcoes }));
+    dispatch({ tipo: "remover-ui", mudanca: { dialogo: null, fim: { maquinaId: d.previa.id, nome: r.nome, aqui: d.aqui, itens } } });
+    dispatch({ tipo: "invalidar", quais: ["maquinas", "frota", "chaves"] });
+    focarNovo();
+  },
+  // D3: "Fechar" encerra o app no Windows (só quando o removido é este computador); senão volta a Computadores.
+  "rm-fim-fechar": () => agir(async () => {
+    const f = estado.removerUi.fim;
+    if (await appEncerraNoFim(f?.aqui === true, window.nodDesktop)) return;
+    dispatch({ tipo: "remover-ui", mudanca: { fim: null } });
+    document.querySelector<HTMLElement>('#espaco [data-act="secao-espaco"][data-secao="maquinas"]')?.focus();
+  }),
   "maq-desconectar": (el) => {
     const id = el.dataset.maquina ?? "";
     const temContas = (estado.contasIa?.contas ?? []).some((c) => c.maquinas.some((v) => v.maquinaId === id && v.estado === "pronta"));
@@ -7478,6 +7548,16 @@ document.addEventListener("keydown", (ev) => {
     focarGatilho(volta);
     return;
   }
+  // ADA-245: o Esc fecha o diálogo de remover (fora do envio) e devolve o foco ao "…"; a tela de Fim só sai pelo "Fechar".
+  if (estado.removerUi.dialogo) {
+    ev.stopPropagation();
+    void ACOES["rm-fechar"]?.(document.body);
+    return;
+  }
+  if (estado.removerUi.fim && estado.onboardingTexto && estado.espaco.secao === "maquinas") {
+    ev.stopPropagation();
+    return;
+  }
   const u = estado.contasUi;
   const mudanca = u.confirmar ? { confirmar: null } : u.desconectar ? { desconectar: null } : u.menu || u.maquinaMenu ? { menu: null, maquinaMenu: null } : u.renomear ? { renomear: null } : u.maquinaRenomear ? { maquinaRenomear: null } : null;
   if (!mudanca) return;
@@ -7535,6 +7615,16 @@ document.addEventListener("change", (ev) => {
     const arquivo = cb.files?.[0];
     cb.value = "";
     if (arquivo) void instalarSsh.chaveDoArquivo(arquivo);
+    return;
+  }
+  // ADA-245: as duas caixas do "Remover o nod deste computador?" atravessam os redesenhos sem redesenhar agora.
+  if (cb.matches("[data-rm-caixa]")) {
+    const d = estado.removerUi.dialogo;
+    if (d) estado.removerUi = { ...estado.removerUi, dialogo: cb.dataset.rmCaixa === "ias" ? { ...d, manterIas: !cb.checked } : { ...d, manterConexao: cb.checked } };
+    // O parágrafo de um computador desligado muda com "Continuar ligado": só ele, sem redesenhar (o foco fica na caixa).
+    const nd = estado.removerUi.dialogo;
+    const p = document.getElementById("rm-texto");
+    if (nd && p) p.textContent = textoDeRemover(nd.previa, { aqui: nd.aqui, manterConexao: nd.manterConexao }).texto;
     return;
   }
   if (cb.matches("[data-maq-sair-contas]")) {

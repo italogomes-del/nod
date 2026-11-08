@@ -11,6 +11,7 @@ import type { SubagenteVivo, TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
 import { log } from "../../obs/log.ts";
 import { ENTREGA_ESPERA_INICIAL_MS, ENTREGA_ESPERA_MAX_MS, ENTREGA_PERSISTENCIA_MS, LEASE_MS, TOLERANCIA_REINICIO_MS } from "../../shared/constantes.ts";
+import { lerOpcoesRemover } from "../../shared/opcoes-remover.ts";
 
 // NOD-214: a máquina desiste do turno sem resposta ANTES de o lease vencer no servidor — nunca roda o que ele já deu por perdido.
 if (TOLERANCIA_REINICIO_MS >= LEASE_MS) throw new Error("TOLERANCIA_REINICIO_MS precisa ficar abaixo de LEASE_MS");
@@ -327,7 +328,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
           const r = await chamar<Partial<PuxadaDeContas>>("contas", {}, { rota404: true });
           // NOD-9 PR4: as IAs que a tela pediu para atualizar (só as conhecidas; o servidor antigo não manda o campo).
           const atualizar = Array.isArray(r.atualizar) ? r.atualizar.filter((x): x is IaComConta => (IAS_COM_CONTA as readonly unknown[]).includes(x)) : [];
-          return { logins: Array.isArray(r.logins) ? r.logins : [], sair: Array.isArray(r.sair) ? r.sair.filter((x): x is string => typeof x === "string") : [], desconectar: r.desconectar === true, ...(atualizar.length > 0 ? { atualizar } : {}) };
+          // ADA-245: a limpeza local do computador removido por outro lugar; forma estranha = sem limpeza.
+          const remover = lerOpcoesRemover(r.remover); // com "Continuar ligado" vem sem desconectar (revisão do PR #694)
+          return { logins: Array.isArray(r.logins) ? r.logins : [], sair: Array.isArray(r.sair) ? r.sair.filter((x): x is string => typeof x === "string") : [], desconectar: r.desconectar === true, ...(atualizar.length > 0 ? { atualizar } : {}), ...(remover ? { remover } : {}) };
         } catch (e) {
           return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;
         }

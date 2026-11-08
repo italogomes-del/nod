@@ -12,6 +12,7 @@ import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento
 import { semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
 import { EXECUTORES_BOTS } from "./acoes/bots.ts";
 import { EXECUTORES_TIMES } from "./acoes/times.ts";
+import { EXECUTORES_MAQUINAS } from "./acoes/maquinas.ts";
 import { EXECUTORES_ACESSOS } from "./acoes/acessos.ts";
 import { fraseDoLote, ROTULO_DO_NIVEL } from "../domain/acessos-em-lote.ts";
 import { listaFalada } from "../domain/times.ts";
@@ -52,6 +53,7 @@ const VERBO: Record<AcaoLote["tipo"], string> = {
   mudar_modo: "Mudar modo",
   restaurar_versao: "Restaurar versão do perfil de",
   excluir_time: "Excluir o time",
+  remover_computador: "Remover o nod de",
   acessos_em_lote: "Mudar o acesso de vários bots",
   padrao_acesso: "Mudar o padrão do app",
   desfazer_acessos: "Desfazer o lote de acessos",
@@ -67,15 +69,21 @@ function linhaDeAcessos(a: Pick<AcaoNoLote, "tipo" | "app" | "nivel_lote" | "bot
 }
 
 /** Uma linha legível da ação (a mensagem de sistema do desfecho). */
-export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao" | "membros" | "nivel_lote" | "bots_nomes" | "todos">): string {
+export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao" | "membros" | "nivel_lote" | "bots_nomes" | "todos" | "assume_nome">): string {
   if (a.tipo === "acessos_em_lote" || a.tipo === "padrao_acesso" || a.tipo === "desfazer_acessos") return linhaDeAcessos(a);
   if (a.tipo === "excluir_time") return `Excluir o time ${a.alvoNome} (${a.membros?.length ? `${listaFalada(a.membros)} ${a.membros.length === 1 ? "foi" : "foram"} para Sem time` : "sem bots"})`;
+  if (a.tipo === "remover_computador") {
+    const n = a.membros?.length ?? 0;
+    // ADA-245: o recibo nomeia quem assumiu; sem ninguém (o único computador), os bots esperam um computador.
+    const destino = a.assume_nome === null ? (n === 1 ? "espera um computador" : "esperam um computador") : `${n === 1 ? "passou" : "passaram"} para ${a.assume_nome ?? "o computador padrão"}`;
+    return `Remover o nod de ${a.alvoNome} (${n ? `${listaFalada(a.membros!)} ${destino}` : "sem bots"})`;
+  }
   if (a.tipo === "restaurar_versao") return `Restaurar a versão ${a.versao ?? "?"} do perfil de ${a.alvoNome}`;
   const extra = a.tipo === "mover" ? ` para ${a.secao ? `"${a.secao}"` : "Sem time"}` : a.tipo === "dar_acesso" ? ` ao ${a.app} (${a.nivel === "escrita" ? "ler e alterar" : "ler"})` : a.tipo === "mudar_modo" ? ` para ${a.modo}` : "";
   return `${VERBO[a.tipo]} ${a.alvoNome}${extra}`;
 }
 
-type Feito = { botId: string | null; nome: string; events: RuntimeEvent[]; aviso?: string; membros?: string[]; loteId?: string };
+type Feito = { botId: string | null; nome: string; events: RuntimeEvent[]; aviso?: string; membros?: string[]; loteId?: string; assumeNome?: string | null };
 
 /** NOD-289 (M2): o que a pessoa precisa saber da cópia pedida ao Nod. */
 export const AVISO_ROTINAS_PAUSADAS = "rotinas da cópia vieram pausadas; ative em Rotinas";
@@ -147,6 +155,11 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       // Revisão 1 (M6): o recibo diz quem foi de verdade para Sem time agora, não quem estava quando o card abriu.
       return { botId: null, nome: r.data.time.nome, events: r.events ?? [], membros: r.data.bots.map((b) => b.nome) };
     }
+    case "remover_computador": {
+      // ADA-245: o card "Remover o nod de X?" aprovado roda o mesmo executor da tela (POST /maquinas/:id/remover).
+      const r = await EXECUTORES_MAQUINAS["maquinas.remover"](deps, { maquinaId: a.maquina_id ?? "", manterIas: a.manter_ias === true, manterConexao: a.manter_conexao === true, ...(ctx.pelaPessoa ? {} : { autoria: autoriaDoAgente(deps.escopo, ctx.nodId) }) });
+      return { botId: null, nome: r.data.nome, events: r.events ?? [], membros: r.data.bots, assumeNome: r.data.assume?.nome ?? null };
+    }
     case "acessos_em_lote": {
       // ADA-241: o mesmo executor da tela (POST /conectores/:id/acessos/lote). Ler e alterar só com o card aprovado pela
       // pessoa (`pelaPessoa`): o modo do bot nunca o confirma (pessoa_confirma); isto é a segunda cerca.
@@ -200,6 +213,8 @@ async function executarEmOrdem(
       a.botId = feito.botId;
       if (feito.aviso) a.aviso = feito.aviso;
       if (feito.membros) a.membros = feito.membros;
+      // ADA-245: o recibo nomeia quem assumiu na hora do ok, não quem assumiria quando o card abriu.
+      if (feito.assumeNome !== undefined) a.assume_nome = feito.assumeNome;
       // ADA-241: o lote aplicado pelo card guarda o id (o Desfazer pelo chat o usa).
       if (feito.loteId) a.lote_id = feito.loteId;
       // QA de 2026-10-07: no duplicar o card e o desfecho falam do ORIGINAL ("Duplicar Dev 1"); a cópia só vira alvo de "@ref".
@@ -222,7 +237,7 @@ async function linhaDoPedidoViaBot(deps: Deps, agenteId: string): Promise<string
 }
 
 /** O que só outro bot põe no card (gerir_times, gerir_acessos): o recibo diz quem pediu e por qual bot. */
-const VEM_DE_OUTRO_BOT: ReadonlySet<AcaoNoLote["tipo"]> = new Set(["excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos"]);
+const VEM_DE_OUTRO_BOT: ReadonlySet<AcaoNoLote["tipo"]> = new Set(["excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos", "remover_computador"]);
 
 const CAUSAS_DO_RESTAURAR: ReadonlySet<string> = new Set(["igual_a_atual", "versao_redigida", "perfil_mudou"]);
 

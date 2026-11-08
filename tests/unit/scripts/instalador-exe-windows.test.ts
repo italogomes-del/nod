@@ -2,6 +2,7 @@
 // aqui ficam o ícone, a versão do VIProductVersion e as travas do .nsi e dos .ps1 que não podem voltar.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { caminhosNoWindows, IAS_DO_NPM } from "../../../motor/desinstalar.ts";
 // @ts-expect-error: módulo .mjs sem tipos (script de build)
 import { icoDePng, lerPngRgba, gravarPng, reduzir, TAMANHOS_DO_ICONE } from "../../../scripts/windows/icone-ico.mjs";
 // @ts-expect-error: módulo .mjs sem tipos (script de build)
@@ -10,8 +11,9 @@ import { NOME_DO_EXE, versaoNumerica } from "../../../scripts/windows/gerar-exe.
 const ler = (f: string) => readFileSync(new URL(`../../../scripts/windows/${f}`, import.meta.url), "utf8");
 const nsi = ler("instalador.nsi");
 const instalar = ler("instalar-pelo-exe.ps1");
-const desinstalar = ler("desinstalar-pelo-exe.ps1");
+const desinstalar = ler("desinstalar.ps1");
 const testar = ler("testar-exe.ps1");
+const gerarExeFonte = ler("gerar-exe.mjs");
 const workflow = readFileSync(new URL("../../../.github/workflows/desktop-release.yml", import.meta.url), "utf8");
 
 describe("ADA-226: versão do .exe", () => {
@@ -152,10 +154,60 @@ describe("ADA-226: o .ps1 que o .exe roda", () => {
     expect(instalar).toContain("Contains('NOD_INSTALACAO_RESULTADO')");
     expect(instalar).toContain("$env:NOD_INSTALACAO_RESULTADO = ''");
   });
-  it("a desinstalação só para o node da pasta do Nod e guarda a conexão", () => {
+  it("a desinstalação só para o node da pasta do Nod e só apaga caminhos fixos do perfil", () => {
     expect(desinstalar).toContain("$_.ExecutablePath.StartsWith($prefixo, [StringComparison]::OrdinalIgnoreCase)");
-    expect(desinstalar).not.toMatch(/nod-motor\\conexao|Remove-Item\s/);
     expect(desinstalar).toContain("[Microsoft.Win32.RegistryValueKind]::ExpandString");
+    // Um Remove-Item só, dentro do Apagar, e só com -LiteralPath (nada de curinga).
+    expect(desinstalar.match(/Remove-Item\s/g)?.length).toBe(1);
+    expect(desinstalar).toContain("Remove-Item -LiteralPath $Caminho -Recurse -Force");
+    // As bases saem de LOCALAPPDATA/APPDATA, nunca de NOD_PASTA ou NOD_MOTOR_HOME.
+    expect(desinstalar).not.toMatch(/NOD_PASTA|NOD_MOTOR_HOME/);
+    expect(desinstalar).toContain("$pasta = Join-Path $env:LOCALAPPDATA 'nod'");
+    expect(desinstalar).toContain("$dados = Join-Path $env:LOCALAPPDATA 'nod-motor'");
+    expect(desinstalar).toContain("$config = Join-Path $env:APPDATA 'nod-motor'");
+  });
+  it("ADA-245: -ManterConexao e -ManterIas, com as mesmas regras do `nod-motor desinstalar`", () => {
+    expect(desinstalar).toMatch(/^param\(\s*\[switch\]\$ManterConexao,\s*\[switch\]\$ManterIas\s*\)/m);
+    // Os dados do motor saem sempre.
+    expect(desinstalar).toContain("if (Apagar $dados)");
+    // IAs: só as da marca, os mesmos shims e pasta do pacote que motor/desinstalar.ts apaga.
+    const c = caminhosNoWindows({ LOCALAPPDATA: "C:\\U\\L", APPDATA: "C:\\U\\R" })!;
+    expect(c.marca).toBe("C:\\U\\R\\nod-motor\\ias-do-nod.json");
+    expect(desinstalar).toContain("$marca = Join-Path $config 'ias-do-nod.json'");
+    const ias = desinstalar.slice(desinstalar.indexOf("if ($ManterIas) {"), desinstalar.indexOf("if ($ManterConexao) {"));
+    expect(ias).toContain("foreach ($ia in @('claude', 'codex')) { if ($lida.$ia -is [string] -and $lida.$ia -ne '')");
+    for (const [ia, { shims, pacote }] of Object.entries(IAS_DO_NPM)) {
+      expect(shims).toEqual([ia, `${ia}.cmd`, `${ia}.ps1`]);
+      expect(ias).toContain(`${ia} = @('${pacote[1]}', '${pacote[2]}')`);
+    }
+    expect(ias).toContain("(Join-Path $npm $ia), (Join-Path $npm ($ia + '.cmd')), (Join-Path $npm ($ia + '.ps1'))");
+    // Sem a marca nenhuma IA sai; com -ManterIas a marca fica.
+    expect(ias.indexOf("$instaladas = @()")).toBeLessThan(ias.indexOf("if (Test-Path -LiteralPath $marca)"));
+    expect(ias).toMatch(/if \(\$ManterIas\) \{\s+\$marcaFica = \$true/);
+    // Conta: com -ManterConexao só a marca (quando as IAs saíram); sem, a conexão (a pasta inteira se nada precisa ficar).
+    const conta = desinstalar.slice(desinstalar.indexOf("if ($ManterConexao) {"), desinstalar.indexOf("exit 0"));
+    const meio = conta.indexOf("} else {");
+    const manter = conta.slice(0, meio);
+    const sair = conta.slice(meio + 1);
+    expect(manter).toContain("if (-not $marcaFica) { $null = Apagar $marca }");
+    expect(manter).not.toMatch(/conexao\.json|Apagar \$config/);
+    for (const f of [c.conexao, c.contasLocais, c.maquina].map((p) => p.split("\\").pop())) expect(sair).toContain(`(Join-Path $config '${f}')`);
+    expect(sair).toContain("} else { @($config) }");
+    // A pasta do programa fica para o RMDir /r do NSIS (o desinstalador mora nela).
+    expect(desinstalar).not.toContain("Apagar $pasta");
+  });
+  it("ADA-245: o desinstalar-nod.exe passa as escolhas ao .ps1 (/MANTERIAS, /MANTERCONEXAO; o /S mantém as duas)", () => {
+    expect(nsi).toContain('File "/oname=$INSTDIR\\desinstalar.ps1" "desinstalar.ps1"');
+    expect(nsi).not.toContain("desinstalar-pelo-exe.ps1");
+    expect(nsi).toContain('-File "$INSTDIR\\desinstalar.ps1"$Opcoes');
+    const escolher = nsi.slice(nsi.indexOf("Function un.EscolherOpcoes"), nsi.indexOf("FunctionEnd", nsi.indexOf("Function un.EscolherOpcoes")));
+    expect(escolher).toContain('StrCpy $R1 "/MANTERIAS"');
+    expect(escolher).toContain('StrCpy $R1 "/MANTERCONEXAO"');
+    // Silencioso: "Tirar as IAs?" = Não (mantém) e "Continuar ligado?" = Sim (mantém).
+    expect(escolher).toMatch(/Tirar também o Claude e o ChatGPT[^\n]*\/SD IDNO IDYES \+2\n\s+StrCpy \$Opcoes "\$Opcoes -ManterIas"/);
+    expect(escolher).toMatch(/Continuar ligado à sua conta\?[^\n]*\/SD IDYES IDNO \+2\n\s+StrCpy \$Opcoes "\$Opcoes -ManterConexao"/);
+    expect(gerarExeFonte).toContain('"desinstalar.ps1"]');
+    expect(readFileSync(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8")).toContain("'scripts\\windows\\desinstalar.ps1'");
   });
   it("a desinstalação para a árvore do motor (filhos por ParentProcessId), dos filhos para o pai", () => {
     expect(desinstalar).toContain("$f.ParentProcessId -eq $id");
@@ -224,7 +276,7 @@ describe("ADA-226: release", () => {
 describe("ADA-226: codificação dos .ps1 do .exe", () => {
   // O .exe roda os .ps1 no Windows PowerShell 5.1: sem BOM ele lê como ANSI e os acentos saem quebrados
   // (e o PSScriptAnalyzer da CI barra com PSUseBOMForUnicodeEncodedFile).
-  it.each(["instalar-pelo-exe.ps1", "desinstalar-pelo-exe.ps1", "testar-exe.ps1", "conferir-instalacao.ps1"])(
+  it.each(["instalar-pelo-exe.ps1", "desinstalar.ps1", "testar-exe.ps1", "conferir-instalacao.ps1"])(
     "%s é ASCII puro ou começa com o BOM UTF-8",
     (f) => {
       const bytes = readFileSync(new URL(`../../../scripts/windows/${f}`, import.meta.url));

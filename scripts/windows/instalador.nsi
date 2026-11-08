@@ -45,6 +45,7 @@ VIAddVersionKey "LegalCopyright" "Gamefik"
 
 Var Servidor
 Var PowerShell
+Var Opcoes
 
 !define MUI_ICON "${ICONE}"
 !define MUI_UNICON "${ICONE}"
@@ -155,7 +156,7 @@ Section "Nod" SecNod
 
   SetOutPath "$INSTDIR"
   File "/oname=$INSTDIR\nod.ico" "${ICONE}"
-  File "/oname=$INSTDIR\desinstalar-pelo-exe.ps1" "desinstalar-pelo-exe.ps1"
+  File "/oname=$INSTDIR\desinstalar.ps1" "desinstalar.ps1"
   WriteUninstaller "$INSTDIR\${DESINSTALADOR}"
 
   ; Atalho de internet: "Abrir o Nod" e o Nod web, com o motor desta maquina conectado.
@@ -184,11 +185,52 @@ Function un.onInit
   StrCpy $INSTDIR "$LOCALAPPDATA\nod"
 FunctionEnd
 
+; ADA-245: a opcao esta na linha de comando ($R0)? $R1 = a opcao (ex.: "/MANTERIAS"); $R2 = "1" ou "". O == do NSIS
+; ignora maiusculas. Sem o GetOptions (ver LerServidor) e sem valor: so a presenca da palavra conta.
+Function un.TemOpcao
+  StrCpy $R2 ""
+  StrLen $R3 $R1
+  StrLen $R4 $R0
+  StrCpy $R5 0
+  ${DoWhile} $R5 < $R4
+    StrCpy $R6 $R0 $R3 $R5
+    ${If} $R6 == $R1
+      StrCpy $R2 "1"
+      Return
+    ${EndIf}
+    IntOp $R5 $R5 + 1
+  ${Loop}
+FunctionEnd
+
+; ADA-245 (jornada D): as duas escolhas do "Remover o nod deste computador" do app. /MANTERIAS e /MANTERCONEXAO
+; respondem sem perguntar; sem elas a janela pergunta, e o /S (a CI, o suporte) mantem as duas, como antes da ADA-245.
+Function un.EscolherOpcoes
+  StrCpy $Opcoes ""
+  System::Call 'kernel32::GetCommandLine() t .R0'
+  StrCpy $R1 "/MANTERIAS"
+  Call un.TemOpcao
+  ${If} $R2 == "1"
+    StrCpy $Opcoes "$Opcoes -ManterIas"
+  ${Else}
+    MessageBox MB_YESNO|MB_ICONQUESTION "Tirar também o Claude e o ChatGPT instalados pelo Nod?$\r$\n$\r$\nSeus logins neles são seus e ficam." /SD IDNO IDYES +2
+    StrCpy $Opcoes "$Opcoes -ManterIas"
+  ${EndIf}
+  StrCpy $R1 "/MANTERCONEXAO"
+  Call un.TemOpcao
+  ${If} $R2 == "1"
+    StrCpy $Opcoes "$Opcoes -ManterConexao"
+  ${Else}
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Continuar ligado à sua conta?$\r$\n$\r$\nAssim, instalar de novo entra sem login. Sem isso, a conexão deste computador é apagada." /SD IDYES IDNO +2
+    StrCpy $Opcoes "$Opcoes -ManterConexao"
+  ${EndIf}
+FunctionEnd
+
 Section "Uninstall"
   SetDetailsPrint both
   !insertmacro AcharPowerShell
-  ${If} ${FileExists} "$INSTDIR\desinstalar-pelo-exe.ps1"
-    nsExec::ExecToLog '"$PowerShell" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\desinstalar-pelo-exe.ps1"'
+  ${If} ${FileExists} "$INSTDIR\desinstalar.ps1"
+    Call un.EscolherOpcoes
+    nsExec::ExecToLog '"$PowerShell" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\desinstalar.ps1"$Opcoes'
     Pop $0
   ${EndIf}
   Delete "$SMPROGRAMS\Nod.url"

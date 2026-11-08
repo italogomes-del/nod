@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomInt, randomUUID } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DefinicaoAcao } from "../../src/contracts/acoes.ts";
 import type { Escopo } from "../../src/shared/types.ts";
@@ -18,6 +18,7 @@ import { publicar } from "../../src/use-cases/canvas.ts";
 import { gerirAcessos } from "../../src/use-cases/gerir-acessos.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
+import { removerComputadorPeloChat } from "../../src/use-cases/remover-computador.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
 import { CAMINHOS_DAS_ACOES_DE_CONTA, acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, custoDoFuzz, enxugarCasos, executarFuzz, lerN, marcaDoBanco, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, zerarCustoDoFuzz, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -62,7 +63,7 @@ const PRAZO_DO_FUZZ_MS = Math.max(600_000, N * 10_000);
  * não tinha, e o fim exige 100% do registro coberto.
  */
 const CONFIGURACOES: { nome: string; env: Record<string, string> }[] = [
-  { nome: "padrão", env: { NOD_CAPTURA_TELA: "1" } },
+  { nome: "padrão", env: { NOD_CAPTURA_TELA: "1", NOD_ONBOARDING_TEXTO: "1" } },
   { nome: "compartilhado + contas + nuvem", env: { NOD_MODO: "compartilhado", NOD_CONTAS: "1", NOD_MINHA_CONTA: "1", NOD_MAQUINA_NUVEM: "gcp", NOD_ONBOARDING_TEXTO: "1" } },
 ];
 /**
@@ -559,7 +560,11 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // NOD-437: times.excluir (arriscada) tem a via do gerir_times: o time do invariante, com o bot alvo dentro, não pode sumir.
       const TIME_DO_INVARIANTE = "Time do invariante";
       await srv.json("POST", "times", { nome: TIME_DO_INVARIANTE, bots: [botId] });
-      const linhaDoBot = linha;
+      // ADA-245: maquinas.remover (pessoa_confirma) tem a via do remover_computador: o computador do invariante não pode sair.
+      const COMPUTADOR_DO_INVARIANTE = "Computador do invariante";
+      const computadorId = await srv.app.dentro(srv.pessoa, async (d) => (await d.repos.maquinaTokens.criar({ nome: COMPUTADOR_DO_INVARIANTE, prefixo: randomUUID().slice(0, 8), hash: randomBytes(32) }))!.id);
+      const linhaDoComputador = async () => (await srv.dbDono<{ l: string }[]>`select row_to_json(m)::text as l from (select nome, expira_em, revogado_em from maquina_tokens where id = ${computadorId}) m`)[0]?.l;
+      const linhaDoBot = async () => `${await linha()} | ${await linhaDoComputador()}`;
       const linhaDoTime = async () => (await srv.dbDono<{ l: string }[]>`select coalesce((select row_to_json(t)::text from (select nome, nome_chave from times where nome_chave = 'time do invariante' and owner_id = ${srv.pessoa.pessoaId}) t), 'sumiu') as l`)[0]?.l;
       const ambas = async () => `${await linhaDoBot()} | ${await linhaDoTime()}`;
       const antes = await ambas();
@@ -578,6 +583,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         const itens = [...fixos.map((v, i) => ({ rotulo: `fixo ${i}`, v })), ...doFuzz];
         for (const { rotulo, v } of itens) {
           const viaTimes = def.chat.estado === "vivo" && def.chat.via.ferramenta === "gerir_times";
+          const viaRemover = def.chat.estado === "vivo" && def.chat.via.ferramenta === "remover_computador";
           const item = { ...v, tipo: def.lote!.tipo, bot: botId } as unknown as AcaoLote;
           // No gerir_acessos o nível chega como `nivel` e vira o `nivel_lote` do item do card.
           const risco = def.lote!.riscoDe?.(viaAcessos ? ({ ...item, nivel_lote: v.nivel } as unknown as AcaoLote) : item) ?? def.risco;
@@ -599,14 +605,18 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
                   const dado = r1.data as { ok: boolean; esperando?: boolean; decisao_id?: string | null; feito?: unknown };
                   return { ok: dado.ok, ...(dado.esperando ? { esperando: [0], decisao_id: dado.decisao_id ?? null } : { feitas: dado.ok ? [dado.feito] : [] }) };
                 }
-                const lote = viaTimes
+                const lote = viaRemover
+                  ? await removerComputadorPeloChat(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", computador: COMPUTADOR_DO_INVARIANTE, ...v } as never)
+                  : viaTimes
                   ? await gerirTimes(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [{ time: TIME_DO_INVARIANTE, ...v, tipo: "excluir" } as never] })
                   : await gerirBots(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [item] });
                 if (lote.events?.length) await d.repos.events.gravarComOutbox(lote.events);
                 return lote.data;
               });
               // Ok: esperando num cartão (com decisão) ou recusada (falha). Nunca feita.
-              const veredito = vereditoDeDecisao(r);
+              // ADA-245: o remover_computador sempre propõe (um item, sem `feitas`): ok com decisão = esperou num cartão; a linha
+              // do computador do invariante, conferida abaixo, prova que nada mudou antes do ok da pessoa.
+              const veredito = viaRemover ? (r.ok ? (r as { decisao_id?: string }).decisao_id ? "esperou" : "rodou" : "recusou") : vereditoDeDecisao(r as never);
               // eslint-disable-next-line no-console
               if (process.env.FUZZ_DEBUG && rotulo.startsWith("fixo")) console.log(`INV ${def.id} ${caso} ${veredito} ${JSON.stringify(r).slice(0, 200)}`);
               // NOD-437: no gerir_times, excluir um time VAZIO roda direto (emenda da ADR-135); a violação é o time com bots

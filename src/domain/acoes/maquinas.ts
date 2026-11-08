@@ -1,10 +1,14 @@
 import type { DefinicaoAcao } from "../../contracts/acoes.ts";
+import { PROPRIEDADES_COMPUTADORES as PC } from "../../contracts/ferramentas-computadores.ts";
 import { PROPRIEDADES_MAQUINAS as P } from "../../contracts/ferramentas-maquinas.ts";
 
 /**
  * Máquinas, nuvem e computadores (NOD-391, ADR-135; Onda 4, NOD-396). Nunca pelo chat: o que entrega um segredo
  * (a chave de máquina crua, a senha ou a chave SSH), o pareamento de um aparelho (a pessoa confere o código na tela
  * do aparelho), o login Google da nuvem (OAuth no navegador) e as mãos da pessoa no computador.
+ *
+ * maquinas.remover (ADA-245, jornada D): `vivo` e `pessoa_confirma` — a tela (POST /maquinas/:id/remover) e o
+ * remover_computador de qualquer bot chamam o mesmo executor (src/use-cases/acoes/maquinas.ts); no chat é SEMPRE card.
  */
 
 const falta = { estado: "falta", onda: "NOD-396" } as const;
@@ -23,6 +27,17 @@ export const ACOES_MAQUINAS = [
   { id: "maquinas.aprovar_dispositivo", titulo: "Aprovar um aparelho pelo código", risco: "pessoa_confirma", cartaoNoChat: false, chat: { estado: "nunca", motivo: "pareamento: a pessoa confere o código no aparelho" } },
   { id: "maquinas.convidar", titulo: "Convidar uma máquina", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "maquinas.editar", titulo: "Renomear ou ajustar uma máquina", risco: "muda", cartaoNoChat: false, chat: falta },
+  {
+    id: "maquinas.remover",
+    titulo: "Remover o nod de um computador (os bots de lá passam para o padrão)",
+    schema: { type: "object", properties: { computador: PC.computador, manter_ias: PC.manter_ias, manter_conexao: PC.manter_conexao }, required: ["computador"], additionalProperties: false },
+    risco: "pessoa_confirma",
+    cartaoNoChat: true,
+    chat: { estado: "vivo", via: { ferramenta: "remover_computador", tipoNoLote: "remover_computador" }, contrato: "tests/integration/paridade-maquinas-remover.test.ts" },
+    casoDeUso: "maquinas.remover",
+    exigeOrigemHumana: true,
+    lote: { tipo: "remover_computador" },
+  },
   { id: "maquinas.desconectar", titulo: "Desconectar uma máquina", risco: "arriscada", cartaoNoChat: false, chat: falta },
   { id: "maquinas.atualizar_ia", titulo: "Atualizar a IA instalada numa máquina", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "maquinas.definir_padrao", titulo: "Escolher a máquina padrão", schema: { type: "object", properties: { maquina: P.maquina, qualquer_uma: P.qualquer_uma }, required: [], additionalProperties: false }, risco: "muda", cartaoNoChat: false, chat: VIVO_MAQUINAS, casoDeUso: "maquinas.definir_padrao" },

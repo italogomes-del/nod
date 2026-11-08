@@ -39,6 +39,11 @@ export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: str
   { id: "feedback", nome: "Feedback", icone: ICONE.bandeira },
 ];
 
+/** ADA-245 (jornada D): com o texto do onboarding, "Máquinas" se chama "Computadores". */
+export function nomeDaSecao(s: { id: SecaoEspaco; nome: string }, estado: Pick<Estado, "onboardingTexto">): string {
+  return s.id === "maquinas" && estado.onboardingTexto ? "Computadores" : s.nome;
+}
+
 /** O Entendi da faixa "entre nos sites de novo uma vez" fica neste navegador. */
 export const CHAVE_AVISO_RECRIADO = "nod.computador.aviso-recriado";
 
@@ -64,7 +69,7 @@ export type ExtrasEspaco = {
 export function renderEspaco(estado: Estado, avisos: EstadoAvisos, volta: Volta, extras: ExtrasEspaco, celular = ehCelular()): string {
   if (celular) return renderEspacoCelular(estado, avisos, volta, extras);
   const secao = estado.espaco?.secao ?? "conexao";
-  const nav = SECOES_ESPACO.map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(s.nome)}</span></button>`).join("");
+  const nav = SECOES_ESPACO.map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(nomeDaSecao(s, estado))}</span></button>`).join("");
   return `<div class="espaco cfg-espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
     <nav class="espaco-nav" aria-label="Seções das Configurações">
       <div class="espaco-volta"><button type="button" class="espaco-voltar" data-act="fechar-espaco" aria-keyshortcuts="Escape" title="Voltar para ${esc(volta.rotulo)} (Esc)">${ICONE.voltar}${volta.icone}<span>${esc(volta.rotulo)}</span></button><kbd>esc</kbd></div>
@@ -92,7 +97,8 @@ function renderEspacoCelular(estado: Estado, avisos: EstadoAvisos, volta: Volta,
       </main>
     </div>`;
   }
-  const nome = SECOES_ESPACO.find((s) => s.id === secao)?.nome ?? "Configurações";
+  const achada = SECOES_ESPACO.find((s) => s.id === secao);
+  const nome = achada ? nomeDaSecao(achada, estado) : "Configurações";
   const corpo = comSaibaMais({ celular: true, abertos: estado.configUi.abertos }, () => conteudo(estado, secao, avisos, extras, true));
   return `<div class="espaco cfg-espaco cfg-celular cfg-secao-tela" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
     <div class="cfg-topo"><button type="button" class="espaco-voltar cfg-redondo" data-act="cfg-lista" aria-label="Voltar para Configurações">${ICONE.voltar}</button><h1 id="espaco-titulo" class="cfg-topo-tit">${secao === "rotinas" ? tituloDaAgendaCelular(estado) : esc(nome)}</h1></div>
@@ -102,7 +108,7 @@ function renderEspacoCelular(estado: Estado, avisos: EstadoAvisos, volta: Volta,
 
 /** A lista do celular: cada linha é ícone de traço, título, no máximo um valor curto e ›; nada embaixo do título. */
 function listaDeSecoes(estado: Estado, extras: ExtrasEspaco): string {
-  const linha = (s: (typeof SECOES_ESPACO)[number], valor = "") => `<button type="button" class="cfg-item" data-act="secao-espaco" data-secao="${s.id}"><span class="cfg-item-ic" aria-hidden="true">${s.icone}</span><span class="cfg-item-nome">${esc(s.nome)}</span>${valor ? `<span class="cfg-item-valor">${esc(valor)}</span>` : ""}<span class="cfg-item-seta" aria-hidden="true">${ICONE.seta}</span></button>`;
+  const linha = (s: (typeof SECOES_ESPACO)[number], valor = "") => `<button type="button" class="cfg-item" data-act="secao-espaco" data-secao="${s.id}"><span class="cfg-item-ic" aria-hidden="true">${s.icone}</span><span class="cfg-item-nome">${esc(nomeDaSecao(s, estado))}</span>${valor ? `<span class="cfg-item-valor">${esc(valor)}</span>` : ""}<span class="cfg-item-seta" aria-hidden="true">${ICONE.seta}</span></button>`;
   const secao = (id: SecaoEspaco) => SECOES_ESPACO.find((s) => s.id === id)!;
   const c = extras.conta;
   const quem = c.nome ?? c.email ?? "Você";

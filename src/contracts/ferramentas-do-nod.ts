@@ -15,9 +15,9 @@ import type { ModoAprovacao } from "./agente.ts";
 /** definido em 2026-10-07: um pedido do Nod mexe em até 20 bots — acima disso, é melhor ele dividir e a pessoa ver. */
 export const MAX_ACOES_LOTE = 20;
 
-export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao", "excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos"] as const;
-/** O que só outra ferramenta põe no card: excluir_time (gerir_times, NOD-437) e os de acesso em lote (gerir_acessos, ADA-241). */
-const SO_DE_OUTRA_FERRAMENTA: ReadonlySet<string> = new Set(["excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos"]);
+export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao", "excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos", "remover_computador"] as const;
+/** O que só outra ferramenta põe no card: excluir_time (gerir_times, NOD-437) os de acesso em lote (gerir_acessos, ADA-241) e remover_computador (só a ferramenta remover_computador, ADA-245). */
+const SO_DE_OUTRA_FERRAMENTA: ReadonlySet<string> = new Set(["excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos", "remover_computador"]);
 /** NOD-437: o que o gerir_bots aceita — o lote sem o que só outra ferramenta põe no card. */
 export const TIPOS_ACAO_GERIR_BOTS = TIPOS_ACAO_LOTE.filter((t) => !SO_DE_OUTRA_FERRAMENTA.has(t));
 export type TipoAcaoLote = (typeof TIPOS_ACAO_LOTE)[number];
@@ -109,6 +109,12 @@ export type AcaoLote = {
   /** NOD-437, só em excluir_time (o gerir_times monta): o time e os nomes dos bots dele, para o card ler sem consultar. */
   time_id?: string;
   membros?: string[];
+  /** ADA-245, só em remover_computador (a ferramenta remover_computador monta): o computador e as duas opções do diálogo. */
+  maquina_id?: string;
+  manter_ias?: boolean;
+  manter_conexao?: boolean;
+  /** Quem assume os bots de lá (o nome, como na prévia); null = ninguém, eles esperam um computador. O card e o recibo nomeiam. */
+  assume_nome?: string | null;
   /**
    * ADA-241, só nos de acesso em lote (o gerir_acessos monta): o app, o nível (com Nenhum), os bots (ids e nomes, para o
    * card ler sem consultar) ou `todos`, a chave do clique, o `aplicar` do padrão e o lote do Desfazer.

@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **191**, mais 3 só de leitura. No chat: **65 vivas**, 3 parciais, 92 faltando e 34 que nunca vão para o chat. Piso de vivas: 65.
+Ações de pessoa que mudam algo: **192**, mais 3 só de leitura. No chat: **66 vivas**, 3 parciais, 92 faltando e 34 que nunca vão para o chat. Piso de vivas: 66.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -101,6 +101,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `maquinas.aprovar_dispositivo` | Aprovar um aparelho pelo código | pessoa_confirma | nunca: pareamento: a pessoa confere o código no aparelho | `POST ^\/maquinas\/dispositivos\/(?<codigo>[^/]+)\/aprovar$` |
 | `maquinas.convidar` | Convidar uma máquina | muda | falta (NOD-396) | `POST ^\/maquinas\/convites$` |
 | `maquinas.editar` | Renomear ou ajustar uma máquina | muda | falta (NOD-396) | `PATCH ^\/maquinas\/(?<id>[^/]+)$` |
+| `maquinas.remover` | Remover o nod de um computador (os bots de lá passam para o padrão) | pessoa_confirma | vivo (`remover_computador remover_computador`) | `POST ^\/maquinas\/(?<id>[^/]+)\/remover$` |
 | `maquinas.desconectar` | Desconectar uma máquina | arriscada | falta (NOD-396) | `POST ^\/maquinas\/(?<id>[^/]+)\/desconectar$` |
 | `maquinas.atualizar_ia` | Atualizar a IA instalada numa máquina | muda | falta (NOD-396) | `POST ^\/maquinas\/(?<id>[^/]+)\/ias\/(?<ia>[^/]+)\/atualizar$` |
 | `maquinas.definir_padrao` | Escolher a máquina padrão | muda | vivo (`gerir_maquinas`) | `PUT ^\/maquinas\/padrao$` |

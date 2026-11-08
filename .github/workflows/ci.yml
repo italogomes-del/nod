@@ -323,7 +323,7 @@ jobs:
         run: |
           npx tsx scripts/windows/gerar-instalador.ts "$env:RUNNER_TEMP\instalar-nod.ps1"
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
-          $achados = @("$env:RUNNER_TEMP\instalar-nod.ps1", 'scripts\windows\conferir-instalacao.ps1', 'scripts\windows\instalar-pelo-exe.ps1', 'scripts\windows\desinstalar-pelo-exe.ps1', 'scripts\windows\testar-exe.ps1', 'scripts\windows\testar-app.ps1') | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error -ExcludeRule PSAvoidUsingWriteHost }
+          $achados = @("$env:RUNNER_TEMP\instalar-nod.ps1", 'scripts\windows\conferir-instalacao.ps1', 'scripts\windows\instalar-pelo-exe.ps1', 'scripts\windows\desinstalar.ps1', 'scripts\windows\testar-exe.ps1', 'scripts\windows\testar-app.ps1') | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error -ExcludeRule PSAvoidUsingWriteHost }
           $achados | Format-Table ScriptName, RuleName, Line, Message -Wrap | Out-String -Width 200 | Write-Host
           if (@($achados).Count -gt 0) { throw "PSScriptAnalyzer: $(@($achados).Count) achado(s)" }
       - name: instalador do Windows (duas execuções até o pareamento)

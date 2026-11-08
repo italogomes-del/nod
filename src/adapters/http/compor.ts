@@ -1,5 +1,5 @@
 import type { EfeitoAposCommit } from "../../contracts/acoes.ts";
-import { criarLoginsNaMaquina } from "../../services/logins-na-maquina.ts";
+import { criarLoginsNaMaquina, PRAZO_DESCONEXAO_MS, PRAZO_REMOCAO_MS } from "../../services/logins-na-maquina.ts";
 import { anunciarContasDaMaquina } from "../../use-cases/contas-ia.ts";
 import { rotasContasIa } from "./rotas/contas-ia.ts";
 import { rotasInstalacoesSsh } from "./rotas/instalacoes-ssh.ts";
@@ -86,6 +86,8 @@ import { ajustarBarraLateral } from "../../use-cases/ajustar-barra-lateral.ts";
 import { gerirQuadro, gerirQuadroEmFases } from "../../use-cases/gerir-quadro.ts";
 import { gerirApps } from "../../use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../use-cases/gerir-times.ts";
+import { removerComputadorPeloChat } from "../../use-cases/remover-computador.ts";
+import { desconectarNaPuxada } from "../../domain/maquinas-remover.ts";
 import { gerirAcessos } from "../../use-cases/gerir-acessos.ts";
 import { gerirMaquinas } from "../../use-cases/gerir-maquinas.ts";
 import { gerirCanvas } from "../../use-cases/gerir-canvas.ts";
@@ -435,7 +437,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, verAgendaPeloAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta, buscarConversas, lerConversa, ajustarBarraLateral, gerirQuadro, gerirQuadroEmFases, gerirApps, naoLidosNoChat, gerirTimes, gerirCanvas, gerirAcessos, gerirMaquinas };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, verAgendaPeloAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta, buscarConversas, lerConversa, ajustarBarraLateral, gerirQuadro, gerirQuadroEmFases, gerirApps, naoLidosNoChat, gerirTimes, gerirCanvas, gerirAcessos, gerirMaquinas, removerComputador: removerComputadorPeloChat };
 
   // NOD-351: a situação da conta para abrir_conta, lida na transação do turno (sem outra conexão do pool). Liga tarde: as
   // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.
@@ -601,7 +603,7 @@ export function comporApp(o: OpcoesCompor): App {
         const daPonte = compartilhado || maquinaDaPonte(d.escopo, machineIdDoPlano);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: true, sessaoPorMaquina: daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: daPonte ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, semFerramentasDoNod, semCriarBots, contas: contasLigadas,
+          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, semFerramentasDoNod, semCriarBots, contas: contasLigadas, onboardingTexto,
           maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
           ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(d.escopo, machineIdDoPlano) } : {}) });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
@@ -628,7 +630,7 @@ export function comporApp(o: OpcoesCompor): App {
     const efeitos: EfeitoAposCommit[] = [];
     const r = await abrirTxEscopada(db, escopo)((trx) => fn({ ...depsDe(trx, escopo), aposCommit: (e) => void efeitos.push(e) }));
     // Pelo Nod (e no clique do cartão do lote), a ação já commitou: a falha do efeito vira aviso no log, não erro do lote.
-    for (const e of efeitos) await rodarAposCommit(escopo, e).catch((erro: unknown) => log("aviso", "efeito_apos_commit_falhou", { tipo: e.tipo, ...(e.tipo === "desligar_computador" ? { agente_id: e.agenteId } : { importacao_id: e.importacaoId }), erro: erro instanceof Error ? erro.message : String(erro) }));
+    for (const e of efeitos) await rodarAposCommit(escopo, e).catch((erro: unknown) => log("aviso", "efeito_apos_commit_falhou", { tipo: e.tipo, ...(e.tipo === "desligar_computador" ? { agente_id: e.agenteId } : e.tipo === "remover_computador" ? { maquina_id: e.maquinaId } : { importacao_id: e.importacaoId }), erro: erro instanceof Error ? erro.message : String(erro) }));
     return r;
   };
   // NOD-374: a sonda de fundo roda fora de tx, sob o contexto de log da dona (o `carregar` do conector precisa dele).
@@ -685,7 +687,7 @@ export function comporApp(o: OpcoesCompor): App {
       const capacidades = daPonte ? ponteHttp.capacidadesDaMaquinaConectada(escopo, t.machineId) : undefined;
       const r = await emitirPlanoTurno(d, {
         turnoId: t.id, machineId: t.machineId, executor: c.executor, permitirResume: false, ghNaMaquina: await ghDaPessoa(escopo, t.machineId),
-        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, semFerramentasDoNod, semCriarBots, contas: contasLigadas,
+        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, semFerramentasDoNod, semCriarBots, contas: contasLigadas, onboardingTexto,
         maquina: daPonte ? ponteHttp.maquina(escopo, t.machineId) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
         ...(capacidades ? { capacidadesDaMaquina: capacidades } : {}),
         recompor: { tokenDeTurno: token, harness: c.harness },
@@ -763,6 +765,7 @@ export function comporApp(o: OpcoesCompor): App {
   if (o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor) services.computadores = computadores;
   rodarAposCommit = async (escopo, efeito) => {
     if (efeito.tipo === "desligar_computador") return computadores.desligarExcluido(escopo, efeito.agenteId);
+    if (efeito.tipo === "remover_computador") return removerDepoisDoCommit(escopo, efeito);
     // NOD-422: a busca do Linear roda em segundo plano (minutos, com progresso); quem confirmou não espera por ela.
     const rodar: RodarNaTx = (fn) => dentro(escopo, async (d) => executar(d, (dd) => fn(dd), undefined));
     void trazerImportacao(rodar, efeito.importacaoId).catch((erro: unknown) => log("erro", "importar_linear_falhou", { importacao_id: efeito.importacaoId, erro: erro instanceof Error ? erro.message : String(erro) }));
@@ -853,6 +856,21 @@ export function comporApp(o: OpcoesCompor): App {
   const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
   // ADR-102 (2026-10-13): os logins de contas pela tela e o pareamento por código/convite (em memória, src/services).
   const logins = criarLoginsNaMaquina(relogio);
+  /**
+   * ADA-245: o computador removido sem o app dele na frente (outra tela, o chat). Ligado: a limpeza vai na próxima puxada
+   * (`remover` + `desconectar`) e a chave cai quando ele confirma (sem "Continuar ligado"). Desligado sem "Continuar
+   * ligado": sai da conta agora (a limpeza local fica para a pessoa, que não tem mais como pedir pelo servidor). Desligado e
+   * ligado à conta: o pedido espera um dia que ele volte. Fora do compartilhado não há puxada: só a revogação.
+   */
+  const removerDepoisDoCommit = async (escopo: Escopo, e: { maquinaId: string; manterIas: boolean; manterConexao: boolean }): Promise<void> => {
+    const viva = compartilhado && ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === e.maquinaId);
+    if (compartilhado && (viva || e.manterConexao)) {
+      logins.pedirRemocao(escopo, e.maquinaId, e, viva ? PRAZO_DESCONEXAO_MS : PRAZO_REMOCAO_MS);
+      if (!e.manterConexao) logins.pedirDesconexao(escopo, e.maquinaId);
+    } else if (!e.manterConexao) await dentro(escopo, (d) => removerMaquina(d, e.maquinaId));
+    log("info", "computador_removido", { maquina_id: e.maquinaId, ligado: viva, manter_conexao: e.manterConexao, manter_ias: e.manterIas });
+    avisarContas(escopo, "maquina");
+  };
   const dispositivo = criarPareamentoDispositivo(relogio);
   // NOD-94 (emenda 11 da ADR-090): os pedidos de instalação da máquina só computador por SSH (em memória; só compartilhado).
   // NOD-344: o pedido que falha ou expira revoga o convite dele (o script pode parear depois da falha).
@@ -953,7 +971,10 @@ export function comporApp(o: OpcoesCompor): App {
         const sair = await dentro(escopo, (d) => d.repos.contasIa.saidasPendentes(chaveId));
         // NOD-9 (definido em 2026-10-22): o pedido de atualizar sai uma vez, na puxada seguinte ao clique.
         const atualizar = logins.atualizacoesPedidas(escopo, chaveId);
-        return { logins: logins.pendentes(escopo, chaveId), sair, desconectar: logins.desconexaoPedida(escopo, chaveId), ...(atualizar.length ? { atualizar } : {}) };
+        // ADA-245: o pedido de remover viaja com `desconectar` só saindo da conta (desconectarNaPuxada: com "Continuar
+        // ligado", o cliente antigo sairia das contas e apagaria a conexão; o novo age pelo `remover`).
+        const remover = logins.remocaoPedida(escopo, chaveId);
+        return { logins: logins.pendentes(escopo, chaveId), sair, desconectar: desconectarNaPuxada(logins.desconexaoPedida(escopo, chaveId), remover), ...(atualizar.length ? { atualizar } : {}), ...(remover ? { remover } : {}) };
       },
       progresso: async (escopo: Escopo, chaveId: string, p: ProgressoDoLogin) => {
         const r = logins.progresso(escopo, chaveId, p);
@@ -974,7 +995,9 @@ export function comporApp(o: OpcoesCompor): App {
           await d.repos.contasIa.saiu(chaveId, impressoes);
           // "Desconectar com sair das contas": a máquina confirmou — agora a chave dela é revogada. Pelo removerMaquina (A7,
           // QA): o aviso "sem contato" em curso dela sai dispensado, como no revogar da tela, e não fecha como "voltou".
-          if (desconectada && logins.concluirDesconexao(escopo, chaveId)) await removerMaquina(d, chaveId);
+          // ADA-245: o removido "Continuar ligado" confirma sem sair da conta (não houve pedirDesconexao, a chave fica).
+          const remocao = desconectada ? logins.concluirRemocao(escopo, chaveId) : null;
+          if (desconectada && logins.concluirDesconexao(escopo, chaveId) && !remocao?.manterConexao) await removerMaquina(d, chaveId);
         });
         avisarContas(escopo, "saiu");
       },
@@ -1517,7 +1540,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasAtualizacaoApp({ config: configAtualizacaoApp, versaoMinima: VERSAO_MINIMA_APP, publicadaEm: new Date(relogio()).toISOString().replace(/\.\d{3}Z$/, "Z"),
       assinar: configAtualizacaoApp ? cachearAssinador(o.assinadorAtualizacaoApp ?? criarAssinadorGcs({ bucket: configAtualizacaoApp.bucket, fonteToken: criarFonteDeToken({ env }) }), { agora: relogio }) : null }),
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_COMPUTADORES === "motor" ? { computador: true } : {}), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
-    ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), maquinaAtualizaIas: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id && m.atualizaIas), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
+    ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, onboardingTexto, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), plataformaDaMaquina: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).find((m) => m.machineId === id)?.plataforma ?? null, maquinaAtualizaIas: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id && m.atualizaIas), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
     ...(compartilhado ? rotasInstalacoesSsh({ dentro, instalacoes, dispositivo, ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }) : []),
     ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), pareadaPorConvite, ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) , nuvem: nuvemLigada }),
     ...(nuvemLigada ? rotasNuvem({ dentro, segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO), oauth: oauthNuvem(env), conta: o.nuvem?.conta ?? criarContaGcp({ contaFaturamento: env.NOD_NUVEM_CONTA_FATURAMENTO ?? null }), ...(o.nuvem?.fetchImpl ? { fetchImpl: o.nuvem.fetchImpl } : {}), cifrar: (t) => cifrar(t, chave), provedorDa: async (escopo, credencialId) => provedorDaChave(await dentro(escopo, (d) => d.repos.credenciaisNuvem.chaveCifrada(credencialId))), ...(criacaoNuvem ? { registrarConvite: criacaoNuvem.registrarConvite } : {}), agora: relogio }) : []),

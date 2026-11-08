@@ -107,6 +107,22 @@ describe("catálogo e prompt (NOD_CONTAS)", () => {
   });
 });
 
+describe("remover_computador atrás de NOD_ONBOARDING_TEXTO (ADA-245, revisão do PR #694)", () => {
+  const agora = 1_000_000;
+  const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Ada", titulo: "", descricao: "", dono: "pessoa", forma: "shape-square", cor: "c-black", fixado: false, oculto: false, confirmado: true, modelo: "auto", duplicadoDe: null, criadoEm: 0, papel: null };
+  const turno: Turno = { executor: "catcher", tenantId: "t", id: "t1", conversaId: "c1", agenteId: "a1", ownerId: "p", origem: "conversa", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 1, motivoInterrupcao: null, motivoFalha: null, semNovidadeMotivo: null, retomaTurnoId: null, profundidade: 0, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "tira o nod do notebook", entradaAnexos: [], entradaConfianca: "confiavel", custoUsd: null, modelo: "auto", criadoEm: agora, mensagemOrigemId: "m0" };
+  const base: EntradaPlano = { turno, agente, memorias: [], concessoes: [], conectores: [], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.290", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora };
+  const nomes = (e: EntradaPlano) => montarPlano(e).catalogo.ferramentas.map((f) => f.nome);
+
+  it("flag desligada (padrão): o bot não oferece remover um computador, em modo nenhum", () => {
+    for (const modo of ["conversa", "criacao"] as const) expect(nomes({ ...base, modo })).not.toContain("remover_computador");
+  });
+
+  it("flag ligada: entra na conversa e na criação", () => {
+    for (const modo of ["conversa", "criacao"] as const) expect(nomes({ ...base, modo, onboardingTexto: true })).toContain("remover_computador");
+  });
+});
+
 describe("caso de uso abrirConta", () => {
   const ESCOPO = { tenantId: "t1", pessoaId: "p1" };
   const ctx = { turnoId: "tu1", agenteId: "a1", conversaId: "c1" };

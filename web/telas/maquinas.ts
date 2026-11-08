@@ -15,6 +15,7 @@ import { renderContasNaMaquina, type ContextoContas } from "./contas-lista.ts";
 import { linhaEmSegundoPlano, renderInstalarSsh } from "./instalar-ssh.ts";
 import { acoesDaFalha, avisoDaConta, criandoDaConta, fraseDaCriacao, motivoLegivel, nomeDaZona, nuvemLigada, OPCOES_SONO, REGIOES_CRIAR, rotuloEstadoNuvem, rotuloSono, TAMANHOS_CRIAR, temLinhaDeFalha, urlConsoleGoogle } from "../lib/maquina-nuvem.ts";
 import type { MaquinaCriandoDto } from "../../src/contracts/provedor-nuvem.ts";
+import { dialogoRemover, telaFimRemover } from "./remover-computador.ts";
 
 /** ADR-147 (2026-11-03): o nome do sistema na lista e no pareamento; null (não conectada) segue como Mac. */
 function nomeDaPlataforma(p: string | null | undefined): string {
@@ -29,7 +30,9 @@ function nomeDaPlataforma(p: string | null | undefined): string {
 
 const NOME_IA: Record<string, string> = { "claude-cli": "Claude Code", "codex-cli": "Codex" };
 
-function nomePlataforma(m: MaquinaDto): string {
+function nomePlataforma(m: MaquinaDto, ob = false): string {
+  // ADA-245: com o texto do onboarding, o status já diz "Offline"; a plataforma conhecida segue (null = sem plataforma).
+  if (ob) return m.plataforma ? `${nomeDaPlataforma(m.plataforma)}${soComputador(m) ? " · só computador" : ""}` : "";
   if (!m.conectada) return "não conectada agora";
   return `${nomeDaPlataforma(m.plataforma)}${soComputador(m) ? " · só computador" : ""}`;
 }
@@ -102,6 +105,22 @@ export function botsDaPessoa(estado: Estado): Agente[] {
   return (estado.frota?.agentes ?? []).filter((a) => a.ownerId === estado.sessao?.pessoaId && !a.excluidoEm);
 }
 
+/** ADA-245: o nome da IA no texto do onboarding (o protótipo da jornada D: "o Claude ou o ChatGPT"). */
+const NOME_IA_ONBOARDING: Record<string, string> = { "claude-cli": "Claude", "codex-cli": "ChatGPT" };
+
+/**
+ * ADA-245 (D1): "Claude conectado como ana@…" — as contas prontas neste computador (com o e-mail que a conta anunciou);
+ * sem a lista de contas, as IAs prontas que ele anunciou. Nada pronto: "nenhuma IA conectada".
+ */
+export function iaConectadaEmTexto(estado: Pick<Estado, "contasIa">, m: MaquinaDto): string {
+  const contas = estado.contasIa?.disponivel ? estado.contasIa.contas.filter((c) => c.maquinas.some((v) => v.maquinaId === m.id && v.estado === "pronta")) : [];
+  const porIa = new Map<string, string | null>();
+  for (const c of contas) if (!porIa.has(c.ia) || (!porIa.get(c.ia) && c.email)) porIa.set(c.ia, c.email);
+  if (porIa.size === 0) for (const [ia, est] of Object.entries(m.ias)) if (est === "pronto") porIa.set(ia, null);
+  if (porIa.size === 0) return "nenhuma IA conectada";
+  return [...porIa].map(([ia, email]) => `${NOME_IA_ONBOARDING[ia] ?? ia} conectado${email ? ` como ${email}` : ""}`).join(" · ");
+}
+
 /** As IAs que a máquina anunciou, em texto (sem a lista de contas do ADR-102). */
 function iasEmTexto(m: MaquinaDto): string {
   const ias = Object.entries(m.ias).map(([id, est]) => `${NOME_IA[id] ?? id} ${est === "pronto" ? "pronto" : est === "nao_autenticado" ? "sem login" : "ausente"}`);
@@ -153,7 +172,8 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
 /** O quanto os bots podem usar (ADR-085): um valor só, no "…" de uma máquina só (NOD-373: o Mac; sem Mac, a padrão). */
 export function itensDoUso(estado: Estado): string {
   const radios = USOS.map((u) => itemMenu("uso-do-mac", "", u.nome, { papel: "menuitemradio", marcado: u.id === estado.usoDoMac, dados: { uso: u.id }, nota: u.explicacao })).join("");
-  return `<div role="group" aria-labelledby="uso-tit"><span class="cl-menu-tit" id="uso-tit">Quanto os bots podem usar</span>${radios}</div>${textoNoMenu("Um valor só, o de hoje: vale para todas as máquinas. Cada uma segura trabalho novo pela própria leitura.", "uso-nota")}`;
+  const nota = estado.onboardingTexto ? "Um valor só, o de hoje: vale para todos os computadores. Cada um segura trabalho novo pela própria leitura." : "Um valor só, o de hoje: vale para todas as máquinas. Cada uma segura trabalho novo pela própria leitura.";
+  return `<div role="group" aria-labelledby="uso-tit"><span class="cl-menu-tit" id="uso-tit">Quanto os bots podem usar</span>${radios}</div>${textoNoMenu(nota, "uso-nota")}`;
 }
 
 /** A máquina que tem o controle do uso (NOD-373): o id e o nome que aparece na lista. */
@@ -176,7 +196,7 @@ export function donoDoUso(todas: readonly MaquinaDto[], idsDoMac: ReadonlySet<st
 function usoNoMenu(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null): string {
   if (soComputador(m) || !usoEm) return "";
   if (usoEm.id === m.id) return `${itensDoUso(estado)}<hr>`;
-  return textoNoMenu(`O limite de uso fica no “…” da máquina ${esc(usoEm.nome)}.`, `uso-onde-${m.id}`);
+  return textoNoMenu(`O limite de uso fica no “…” ${estado.onboardingTexto ? "do computador" : "da máquina"} ${esc(usoEm.nome)}.`, `uso-onde-${m.id}`);
 }
 
 /** ADR-102 (G2-M3) + NOD-367: o "…" da máquina — a leitura, o uso, renomear, contas, bots, a chave e desconectar. */
@@ -184,6 +204,7 @@ function itensDaMaquina(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, 
   const bots = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id).map((b) => b.nome);
   const chave = (estado.chaves ?? []).find((c) => c.id === m.id && !c.revogadaEm);
   const contas = estado.contasIa?.disponivel ? "" : iasEmTexto(m);
+  if (estado.onboardingTexto) return itensDoComputador(estado, m, usoEm, ehEsteMac, bots, contas);
   return [
     m.conectada ? leituraNoCartao(estado, m.id) : "",
     contas ? textoNoMenu(esc(contas), `contas-${m.id}`) : "",
@@ -198,6 +219,32 @@ function itensDaMaquina(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, 
     m.nuvem?.criadaPeloNod ? itemMenu("nuvem-excluir", ICONE.lixo, "Excluir máquina", { perigo: true, dados: { id: m.id, nome: m.nome }, nota: "apaga a VM na sua conta Google" }) : "",
     itemMenu("maq-desconectar", ICONE.sair, "Desconectar máquina", { perigo: true, dados: { maquina: m.id }, nota: "a chave é cancelada e os bots dela voltam para a padrão" }),
     chave ? itemMenu("revogar-chave", ICONE.lixo, "Revogar chave", { perigo: true, dados: { id: chave.id, nome: chave.nome, maquina: m.id }, nota: m.plataforma === "darwin" ? "o Mac para de trabalhar pela sua conta" : "a máquina para de trabalhar pela sua conta" }) : "",
+  ].join("");
+}
+
+/**
+ * ADA-245 (D1/D2, prancha D1): o "…" com o texto do onboarding — sem "Ver a chave" nem "Revogar chave" (ficam nos
+ * Detalhes), com "Tornar padrão" e "Remover o nod deste computador" no lugar de "Desconectar máquina". O computador só
+ * para o computador dos bots não roda bots: segue com o desconectar de antes, renomeado.
+ */
+function itensDoComputador(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, ehEsteMac: boolean, bots: string[], contas: string): string {
+  const padrao = estado.maquinas?.padraoId === m.id;
+  return [
+    m.conectada ? leituraNoCartao(estado, m.id) : "",
+    contas ? textoNoMenu(esc(contas), `contas-${m.id}`) : "",
+    usoNoMenu(estado, m, usoEm),
+    ehEsteMac ? itemMenu("maq-abrir", ICONE.monitor, "O que roda agora", { dados: { recolhe: "mac-agora" }, nota: "memória, processador, disco e quem está trabalhando" }) : "",
+    itemMenu("maq-renomear", ICONE.lapis, "Renomear", { dados: { maquina: m.id } }),
+    soComputador(m) || padrao ? "" : itemMenu("maq-tornar-padrao", ICONE.servidor, "Tornar padrão", { dados: { maquina: m.id }, nota: "bot sem computador escolhido trabalha nele" }),
+    estado.contasIa?.disponivel && !soComputador(m) ? itemMenu("cl-gerenciar", ICONE.info, "Gerenciar contas", { dados: { maquina: m.id }, nota: estado.contasIa ? textoDasContas(estado, m) : "" }) : "",
+    soComputador(m) ? "" : itemMenu("maq-bots", ICONE.agentes, "Bots deste computador", { dados: { maquina: m.id }, nota: bots.length === 0 ? "nenhum bot trabalha só aqui" : `${bots.length} ${bots.length === 1 ? "bot" : "bots"}: ${bots.join(", ")}` }),
+    podeDormirPeloGoogle(estado, m) ? itemMenu("nuvem-conectar-abrir", ICONE.servidor, "Dormir e acordar pelo Google", { dados: { maquina: m.id }, nota: "ele dorme parado e acorda quando chega trabalho" }) : "",
+    itemMenu("maq-abrir", ICONE.info, "Detalhes", { dados: { recolhe: `chave-${m.id}` } }),
+    "<hr>",
+    m.nuvem?.criadaPeloNod ? itemMenu("nuvem-excluir", ICONE.lixo, "Excluir na nuvem", { perigo: true, dados: { id: m.id, nome: m.nome }, nota: "apaga a VM na sua conta Google" }) : "",
+    soComputador(m)
+      ? itemMenu("maq-desconectar", ICONE.sair, "Desconectar", { perigo: true, dados: { maquina: m.id }, nota: "ele sai da sua conta" })
+      : itemMenu("rm-abrir", ICONE.sair, "Remover o nod deste computador", { perigo: true, dados: { maquina: m.id } }),
   ].join("");
 }
 
@@ -307,23 +354,33 @@ function dialogoDesconectar(estado: Estado): string {
 }
 
 /** O status da linha: a nuvem manda (dormindo é normal, sem cor de erro); sem contato, "Offline desde"; senão, a leitura. */
-export function statusDaMaquina(estado: Pick<Estado, "trabalhos">, m: MaquinaDto): { texto: string; tom: TomStatus } {
+export function statusDaMaquina(estado: Pick<Estado, "trabalhos">, m: MaquinaDto, ob = false): { texto: string; tom: TomStatus } {
   const n = m.nuvem;
   if (n && n.estado !== "acordada") {
     const desde = n.estado === "dormindo" ? ` desde ${hora(n.estadoDesde)}` : "";
     return { texto: `${rotuloEstadoNuvem(n.estado)}${desde}`, tom: n.estado === "dormindo" ? "neutro" : "atencao" };
   }
   if (!m.conectada) return { texto: m.ultimoUsoEm ? `Offline desde ${dataHora(m.ultimoUsoEm)}` : "Offline", tom: "erro" };
-  return leituraDaMaquina(estado, m.id)?.status ?? { texto: n ? "Acordada" : "Conectada", tom: "ok" };
+  const s = leituraDaMaquina(estado, m.id)?.status ?? { texto: n ? "Acordada" : "Conectada", tom: "ok" as const };
+  return ob ? noMasculino(s) : s;
+}
+
+/** ADA-245: com o texto do onboarding o sujeito é "o computador" (Conectado, Ocupado, Acordado). */
+function noMasculino(s: { texto: string; tom: TomStatus }): { texto: string; tom: TomStatus } {
+  const t = s.texto === "Conectada" ? "Conectado" : s.texto === "Ocupada" ? "Ocupado" : s.texto === "Acordada" ? "Acordado" : s.texto;
+  return { ...s, texto: t };
 }
 
 /** "Este Mac · Mac · 11 bots aqui, 10 pela padrão" / "Google Cloud · São Paulo · 1 bot aqui" / "Linux · nenhum bot aqui". */
 function detalheDaMaquina(estado: Estado, m: MaquinaDto, ehEsteMac: boolean): string {
-  if (soComputador(m)) return `${nomePlataforma(m)} · hospeda o computador dos seus bots e não pega trabalho`;
+  if (soComputador(m)) return `${nomePlataforma(m, estado.onboardingTexto) || "Offline"} · hospeda o computador dos seus bots e não pega trabalho`;
   const aqui = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id);
   const pelaPadrao = aqui.filter((b) => !b.maquinaId || !(estado.maquinas?.maquinas ?? []).some((x) => x.id === b.maquinaId)).length;
-  const bots = aqui.length === 0 ? "nenhum bot aqui" : `${aqui.length} ${aqui.length === 1 ? "bot" : "bots"} aqui${pelaPadrao > 0 ? `, ${pelaPadrao} pela padrão` : ""}`;
-  const onde = m.nuvem ? `Google Cloud · ${nomeDaZona(m.nuvem.zona)}` : nomePlataforma(m);
+  const ob = estado.onboardingTexto;
+  const bots = aqui.length === 0 ? "nenhum bot aqui" : `${aqui.length} ${aqui.length === 1 ? "bot" : "bots"} aqui${pelaPadrao > 0 ? `, ${pelaPadrao} ${ob ? "pelo padrão" : "pela padrão"}` : ""}`;
+  const onde = m.nuvem ? `Google Cloud · ${nomeDaZona(m.nuvem.zona)}` : nomePlataforma(m, ob);
+  // ADA-245 (D1): nome, plataforma, bots aqui, a IA conectada e o e-mail; o status vai à direita.
+  if (ob) return [ehEsteMac ? rotuloDoMac() : "", onde, bots, iaConectadaEmTexto(estado, m)].filter(Boolean).join(" · ");
   return `${ehEsteMac ? `${rotuloDoMac()} · ` : ""}${onde} · ${bots}`;
 }
 
@@ -336,19 +393,25 @@ function detalhesDaChave(estado: Estado, m: MaquinaDto): string {
       <dt>Prefixo</dt><dd><code>…${esc(m.prefixo)}</code></dd>
       ${c ? `<dt>Criada em</dt><dd>${esc(dataHora(c.criadaEm))}</dd>` : ""}
       <dt>Último uso</dt><dd>${uso ? esc(dataHora(uso)) : "nunca usada"}</dd>
-    </dl><p class="lc-nota">A chave inteira só aparece uma vez, quando é criada. Perdeu? Revogue esta e conecte de novo.</p></div>`;
+    </dl><p class="lc-nota">A chave inteira só aparece uma vez, quando é criada. Perdeu? Revogue esta e conecte de novo.</p>${revogarNosDetalhes(estado, m, c)}</div>`;
+}
+
+/** ADA-245: com o texto do onboarding, "Revogar chave" sai do "…" e fica aqui, nos Detalhes. */
+function revogarNosDetalhes(estado: Estado, m: MaquinaDto, c: NonNullable<Estado["chaves"]>[number] | undefined): string {
+  if (!estado.onboardingTexto || !c || c.revogadaEm) return "";
+  return `<div class="cx-rodape"><button type="button" class="bt sm perigo" data-act="revogar-chave" data-id="${esc(c.id)}" data-nome="${esc(c.nome)}" data-maquina="${esc(m.id)}">Revogar chave</button></div>`;
 }
 
 /** Uma máquina: a linha (ícone, nome, detalhe, status e "…") e, embaixo, o que se abre dela. */
 function linhaDaMaquina(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, ehEsteMac: boolean): string {
   const renomear = estado.contasUi.maquinaRenomear === m.id
-    ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt sm">Salvar</button><button type="button" class="bt link sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
+    ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="${estado.onboardingTexto ? "Nome do computador" : "Nome da máquina"}" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt sm">Salvar</button><button type="button" class="bt link sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
     : "";
   const linha = linhaConfig({
     titulo: m.nome,
     detalhe: detalheDaMaquina(estado, m, ehEsteMac),
     icone: m.plataforma === "darwin" || m.plataforma === "win32" ? ICONE.laptop : ICONE.servidor,
-    status: statusDaMaquina(estado, m),
+    status: statusDaMaquina(estado, m, estado.onboardingTexto),
     controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === m.id, rotulo: m.nome, itens: itensDaMaquina(estado, m, usoEm, ehEsteMac), dados: { maquina: m.id } },
   });
   const extras = soComputador(m) ? "" : `${nuvemNoCartao(estado, m)}${formConectarNuvem(estado, m)}`;
@@ -374,7 +437,7 @@ function linhaDoMacSemChave(estado: Estado, id: string, nome: string): string {
     titulo: nome,
     detalhe: `${rotuloDoMac()} · ${detalheDosBotsNoMac(estado)}`,
     icone: ICONE.laptop,
-    status: l?.status ?? { texto: "Conectada", tom: "ok" },
+    status: estado.onboardingTexto ? noMasculino(l?.status ?? { texto: "Conectada", tom: "ok" }) : l?.status ?? { texto: "Conectada", tom: "ok" },
     controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === id, rotulo: nome, dados: { maquina: id }, itens: `${leituraNoCartao(estado, id)}${itensDoUso(estado)}<hr>${itemMenu("maq-abrir", ICONE.monitor, "O que roda agora", { dados: { recolhe: "mac-agora" }, nota: "memória, processador, disco e quem está trabalhando" })}` },
   });
   return `<div class="cfg-maq" data-maquina-linha="${esc(id)}">${linha}${oQueRodaNoMac(estado)}</div>`;
@@ -447,27 +510,37 @@ export function renderMaquinas(estado: Estado): string {
   const idsDoMac = new Set(leituras.filter((l) => l.ehMac).map((l) => l.id)); // "Este Mac": só o do servidor
   const idsDeMac = new Set([...idsDoMac, ...todas.filter((m) => m.plataforma === "darwin").map((m) => m.id)]);
   const usoEm = donoDoUso(todas, idsDeMac, macSemChave ? { id: macSemChave.id, nome: macSemChave.nome } : null, dados?.padraoId ?? null);
-  const cab = `<h2>Máquinas</h2><p class="intro">Onde seus bots trabalham. Cada bot roda o Claude Code ou o Codex na máquina dele; a máquina de um bot se escolhe na ficha dele.</p>`;
+  const ob = estado.onboardingTexto;
+  // ADA-245 (D3): a tela de Fim fica no lugar da seção até a pessoa clicar em "Fechar".
+  if (ob && estado.removerUi.fim) return telaFimRemover(estado.removerUi);
+  const cab = ob
+    ? `<h2>Computadores</h2><p class="intro">Onde seus bots trabalham. Cada bot roda o Claude ou o ChatGPT no computador dele; o computador de um bot se escolhe na ficha dele.</p>`
+    : `<h2>Máquinas</h2><p class="intro">Onde seus bots trabalham. Cada bot roda o Claude Code ou o Codex na máquina dele; a máquina de um bot se escolhe na ficha dele.</p>`;
   const conectar = estado.conectarMaquina ? renderConectar(estado, estado.conectarMaquina) : "";
-  const regras = noMac
+  const regras = ob ? regrasDoPadrao(noMac) : noMac
     ? ehCelular() ? `"Seu Mac": o bot roda no Mac onde o Nod está instalado; uma VM só pega o trabalho dos bots escolhidos para ela. Se a máquina de um bot ficar sem contato, a conversa espera por ela.` : `"Este Mac": o bot roda aqui, onde o Nod está aberto; uma VM só pega o trabalho dos bots escolhidos para ela. Se a máquina de um bot ficar sem contato, a conversa espera por ela.`
     : `"Qualquer uma": o primeiro computador conectado que estiver livre pega o trabalho. Se a máquina de um bot ficar sem contato, a conversa espera por ela; na mensagem você pode rodar em outra só daquela vez.`;
   const padrao = maquinas.length > 0
     ? grupoConfig(null, [linhaConfig({
-      titulo: "Máquina padrão",
-      detalhe: "Bot sem máquina escolhida (e bot novo) trabalha nela",
-      controle: { tipo: "seletor", acao: "maquina-padrao", rotulo: "Máquina padrão", opcoes: opcoesDeMaquina(maquinas, dados?.padraoId ?? null, noMac) },
-    })], { nota: `${regras} Rotinas não mudam de máquina sozinhas; os arquivos de cada bot ficam na máquina onde ele trabalha.${temComputador ? " Uma máquina só computador não entra aqui: ela só hospeda o computador do bot." : ""}` })
+      titulo: ob ? "Computador padrão" : "Máquina padrão",
+      detalhe: ob ? "Bot sem computador escolhido (e bot novo) trabalha nele" : "Bot sem máquina escolhida (e bot novo) trabalha nela",
+      controle: { tipo: "seletor", acao: "maquina-padrao", rotulo: ob ? "Computador padrão" : "Máquina padrão", opcoes: opcoesDeMaquina(maquinas, dados?.padraoId ?? null, noMac, ob) },
+    })], {
+      nota: ob
+        ? `${regras} Rotinas não mudam de computador sozinhas; os arquivos de cada bot ficam no computador onde ele trabalha.${temComputador ? " Um computador só para o computador dos bots não entra aqui." : ""}`
+        : `${regras} Rotinas não mudam de máquina sozinhas; os arquivos de cada bot ficam na máquina onde ele trabalha.${temComputador ? " Uma máquina só computador não entra aqui: ela só hospeda o computador do bot." : ""}`,
+    })
     : "";
   const linhas = [
     ...(macSemChave ? [linhaDoMacSemChave(estado, macSemChave.id, macSemChave.nome)] : []),
     ...todas.map((m) => linhaDaMaquina(estado, m, usoEm, idsDoMac.has(m.id))),
   ];
+  const tituloSuas = ob ? "Seus computadores" : "Suas máquinas";
   const suas = !dados
-    ? grupoConfig("Suas máquinas", [], { notaHtml: `<span role="status">Verificando…</span>` })
+    ? grupoConfig(tituloSuas, [], { notaHtml: `<span role="status">Verificando…</span>` })
     : linhas.length === 0
-      ? grupoConfig("Suas máquinas", [], { nota: noMac ? `Nenhuma máquina conectada ainda. Os bots rodam ${ehCelular() ? "no seu Mac" : "neste Mac"}; conecte uma VM Linux para mandar bots para ela.` : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela." })
-      : grupoConfig("Suas máquinas", linhas, { classe: "cfg-maquinas" });
+      ? grupoConfig(tituloSuas, [], { nota: ob ? "Nenhum computador conectado ainda. Instale o nod num computador e entre na sua conta; ele aparece aqui sozinho." : noMac ? `Nenhuma máquina conectada ainda. Os bots rodam ${ehCelular() ? "no seu Mac" : "neste Mac"}; conecte uma VM Linux para mandar bots para ela.` : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela." })
+      : grupoConfig(tituloSuas, linhas, { classe: "cfg-maquinas", ...(ob ? { contagem: linhas.length } : {}) });
   return `<section class="espaco-secao cfg-secao cfg-maquinas-secao maquinas">
     ${cab}
     ${avisoDaNuvem(estado)}
@@ -480,20 +553,28 @@ export function renderMaquinas(estado: Estado): string {
     ${grupoFinal(estado, todas, noMac, ui)}
     ${dialogoDesconectar(estado)}
     ${dialogoExcluir(estado)}
+    ${ob ? dialogoRemover(estado.removerUi) : ""}
     ${renderInstalarSsh(estado)}
   </section>`;
 }
 
+/** ADA-245 (prancha D1): a nota do computador padrão com o texto do onboarding. */
+function regrasDoPadrao(noMac: boolean): string {
+  if (!noMac) return `"Qualquer um": o primeiro computador conectado que estiver livre pega o trabalho. Se o computador de um bot ficar sem contato, a conversa espera por ele.`;
+  return `"${ehCelular() ? "Seu Mac" : "Este Mac"}": o bot roda ${ehCelular() ? "no Mac onde o Nod está instalado" : "aqui, onde o Nod está aberto"}; um servidor só pega o trabalho dos bots escolhidos para ele. Se o computador de um bot ficar sem contato, a conversa espera por ele.`;
+}
+
 /** As opções do seletor de máquina: "Qualquer uma" (no servidor no Mac, "Este Mac") e as máquinas de trabalho. */
-export function opcoesDeMaquina(maquinas: readonly MaquinaDto[], atual: string | null, noMac: boolean): OpcaoSeletor[] {
+export function opcoesDeMaquina(maquinas: readonly MaquinaDto[], atual: string | null, noMac: boolean, ob = false): OpcaoSeletor[] {
   const valor = atual && maquinas.some((m) => m.id === atual) ? atual : "";
-  return [{ id: "", nome: noMac ? rotuloDoMac() : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.conectada ? m.nome : `${m.nome} (offline)` }))]
+  return [{ id: "", nome: noMac ? rotuloDoMac() : ob ? "Qualquer um" : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.conectada ? m.nome : `${m.nome} (offline)` }))]
     .map((o) => ({ valor: o.id, rotulo: o.nome, selecionado: o.id === valor }));
 }
 
 /** O fim da seção: as chaves revogadas (só com alguma), conectar outra máquina, a nuvem, o atalho do computador e a chave à mão. */
 function grupoFinal(estado: Estado, todas: readonly MaquinaDto[], noMac: boolean, ui: Estado["configUi"]): string {
   const revogadas = (estado.chaves ?? []).filter((c) => c.revogadaEm !== null);
+  const ob = estado.onboardingTexto;
   const linhaRevogada = (c: (typeof revogadas)[number]) => linhaConfig({
     titulo: c.nome,
     detalhe: `…${c.prefixo} · ${c.ultimoUsoEm ? `usada até ${dataHora(c.ultimoUsoEm)}` : "nunca usada"}`,
@@ -502,27 +583,29 @@ function grupoFinal(estado: Estado, todas: readonly MaquinaDto[], noMac: boolean
   const linhas: string[] = [];
   if (revogadas.length > 0) {
     linhas.push(linhaConfig({
-      titulo: `Chaves revogadas (${revogadas.length})`,
+      titulo: ob ? `Computadores que saíram da conta (${revogadas.length})` : `Chaves revogadas (${revogadas.length})`,
       detalhe: "Não entram mais; ficam aqui para você saber quais foram",
       icone: ICONE.cadeado,
       controle: { tipo: "recolhe", id: "revogadas", acao: "config-recolhe", aberto: ui.abertos.includes("revogadas"), conteudo: listaAninhada(revogadas.map(linhaRevogada)) },
     }));
   }
   if (nuvemLigada(estado.nuvem, todas) && !estado.nuvem.criar) {
-    linhas.push(linhaConfig({ titulo: "Criar minha máquina na nuvem", detalhe: "Uma VM na sua conta Google, que dorme parada e acorda quando chega trabalho", icone: ICONE.mais, controle: { tipo: "link", acao: "nuvem-criar-abrir" } }));
+    linhas.push(linhaConfig({ titulo: ob ? "Criar meu computador na nuvem" : "Criar minha máquina na nuvem", detalhe: "Uma VM na sua conta Google, que dorme parada e acorda quando chega trabalho", icone: ICONE.mais, controle: { tipo: "link", acao: "nuvem-criar-abrir" } }));
   }
   if (!estado.conectarMaquina) {
-    linhas.push(linhaConfig({ titulo: "Conectar outra máquina", detalhe: "Um Mac, uma VM ou um computador: o passo a passo gera a chave", icone: ICONE.mais, controle: { tipo: "link", acao: "conectar-maquina" } }));
+    linhas.push(ob
+      ? linhaConfig({ titulo: "Conectar outro computador", detalhe: "Instale o nod nele e entre na sua conta; ele aparece aqui sozinho.", icone: ICONE.mais, controle: { tipo: "link", acao: "conectar-maquina" } })
+      : linhaConfig({ titulo: "Conectar outra máquina", detalhe: "Um Mac, uma VM ou um computador: o passo a passo gera a chave", icone: ICONE.mais, controle: { tipo: "link", acao: "conectar-maquina" } }));
   }
   // NOD-94: o atalho só no modo compartilhado (no local o Mac já é o computador) e fora do Conectar.
   if (estado.maquinas && !noMac && !estado.conectarMaquina && !estado.instalarSsh) {
-    linhas.push(linhaConfig({ titulo: "Usar uma máquina só para o computador", detalhe: "Um lugar para o computador do bot, sem terminal", icone: ICONE.monitor, controle: { tipo: "link", acao: "ssh-abrir" } }));
+    linhas.push(linhaConfig({ titulo: ob ? "Usar um servidor só para o computador dos bots" : "Usar uma máquina só para o computador", detalhe: "Um lugar para o computador do bot, sem terminal", icone: ICONE.monitor, controle: { tipo: "link", acao: "ssh-abrir" } }));
   }
   // ADR-031: a chave gerada à mão (o app do Mac de antes do convite); a crua aparece uma vez.
   const manual = `<form class="cfg-chave-form" data-form="emitir-chave"><label>Nome do computador <input name="nome" required maxlength="60" placeholder="ex.: MacBook do trabalho" data-manter-foco="emitir-chave-nome"></label><button class="bt" type="submit">Gerar chave</button></form>`;
   linhas.push(linhaConfig({
-    titulo: "Gerar uma chave à mão",
-    detalhe: "Para um computador que pede a chave em vez do código",
+    titulo: ob ? "Conectar à mão" : "Gerar uma chave à mão",
+    detalhe: ob ? "Para um computador antigo que pede um código de acesso" : "Para um computador que pede a chave em vez do código",
     icone: ICONE.cadeado,
     controle: { tipo: "recolhe", id: "chave-manual", acao: "config-recolhe", aberto: ui.abertos.includes("chave-manual"), conteudo: `<div class="cfg-chave">${manual}</div>` },
   }));

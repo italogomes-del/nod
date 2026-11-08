@@ -16,6 +16,7 @@ import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, F
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import { cabecalhosDoApp, cabecalhosDoGoogleApp } from "./desafio-app.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { OpcoesRemover, PreviaRemoverDto, ResultadoRemoverDto } from "../../src/contracts/remover-computador.ts";
 import type { InstalacaoCriadaDto, InstalacaoSshDto, MetodoSsh } from "../../src/contracts/instalacoes-ssh.ts";
 import type { CadastroDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, RedefinirDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
 import type { ContaNuvemDto, DormirAposMin, MaquinaCriandoDto, TamanhoMaquinaNuvem } from "../../src/contracts/provedor-nuvem.ts";
@@ -629,6 +630,10 @@ export function criarApi(escopo: Escopo) {
     cancelarLogin: (maquinaId: string, loginId: string) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/cancelar`),
     renomearMaquina: (id: string, nome: string) => patch<{ id: string; nome: string }>(`maquinas/${encodeURIComponent(id)}`, { nome }),
     desconectarMaquina: (id: string, sairDasContas: boolean) => post<{ ok: true; contas: number; aguardandoMaquina: boolean }>(`maquinas/${encodeURIComponent(id)}/desconectar`, { sairDasContas }),
+    // ADA-245 (jornada D): o que o diálogo "Remover o nod deste computador?" diz, e a ação `maquinas.remover`.
+    previaRemover: (id: string) => get<PreviaRemoverDto>(`maquinas/${encodeURIComponent(id)}/remover/previa`),
+    // ADA-245: `daqui` = o app já limpou este computador; o servidor revoga na hora e não manda nada para a puxada.
+    removerComputador: (id: string, opcoes: OpcoesRemover, daqui = false) => post<ResultadoRemoverDto>(`maquinas/${encodeURIComponent(id)}/remover`, daqui ? { ...opcoes, daqui: true } : opcoes),
     criarConvite: (computador?: { substituir: boolean }) => post<{ convite: string; expiraEm: number }>("maquinas/convites", computador ? { papel: "computador", substituir: computador.substituir } : undefined),
     // NOD-94: a máquina só computador instalada por SSH. A credencial só sai daqui cifrada para a instaladora.
     instaladorasSsh: () => get<{ instaladoras: { id: string; nome: string; plataforma: string }[] }>("maquinas/ssh/instaladoras"),

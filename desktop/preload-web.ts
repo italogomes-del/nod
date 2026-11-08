@@ -4,6 +4,7 @@ import type { BarraDesktop, DecisaoBarraDesktop } from "../src/contracts/desktop
 import type { AcaoDeBusca } from "./menu.ts";
 import type { EstadoIa } from "../src/contracts/estado-ia.ts";
 import { CANAIS_MIDIA, type PonteMidia } from "../src/contracts/midia-desktop.ts";
+import { CANAIS_REMOVER, type OpcoesRemover } from "../src/contracts/remover-computador.ts";
 
 /**
  * Preload da JANELA WEB (definido em 2026-09-24, "aviso no Mac"): a página é remota, então a ponte é a
@@ -108,6 +109,9 @@ const ponte: NodDesktop = {
   // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
   vmTentarAgora: () => ipcRenderer.invoke(CANAIS_DESKTOP.vmTentarAgora),
   estaMaquina: () => ipcRenderer.invoke(CANAIS_DESKTOP.estaMaquina), // ADA-243
+  // ADA-245 (jornada D): "Remover o nod deste computador"; o processo principal valida as opções. No Mac o app fica
+  // (sem fecharAposRemover): a tela de Fim volta a Computadores.
+  removerDaqui: (opcoes: OpcoesRemover) => ipcRenderer.invoke(CANAIS_REMOVER.removerDaqui, { manterIas: opcoes?.manterIas === true, manterConexao: opcoes?.manterConexao === true }),
   aoAbrir: (fn: (alvo: AlvoAviso) => void) => {
     // Um ouvinte só (a página registra uma vez; recarregar recria o preload). O evento do IPC não vai à página.
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);

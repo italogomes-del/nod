@@ -56,6 +56,9 @@ import { barraDoPedido, criarFilaDeGravacao, decisoesComPedido, lerAviso, lerCon
 import { abreNoNavegador } from "./links-externos.ts";
 import { arquivoDaMidia } from "./midia-mac.ts";
 import { CANAIS_MIDIA } from "../src/contracts/midia-desktop.ts";
+import { CANAIS_REMOVER, type OpcoesRemover, type ResultadoRemoverDaqui } from "../src/contracts/remover-computador.ts";
+import { lerOpcoesRemover } from "../src/shared/opcoes-remover.ts";
+import { removerDaquiNoMac, type DepsRemoverDaqui } from "./remover-daqui.ts";
 import type { EstaMaquina } from "../src/contracts/desktop-esta-maquina.ts";
 import { estaMaquinaDe } from "../src/domain/esta-maquina.ts";
 import { abrirPrimeiroUsoDaVm, focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
@@ -736,10 +739,12 @@ async function conectar(c: Config) {
       ponte: ponteHttp.contas,
       sair: sairDaContaNoMac,
       todas: () => (contasLocais?.anuncio() ?? []).map((c) => c.impressao),
-      desconectar: async () => {
+      desconectar: async (remover?: OpcoesRemover) => {
         log("info", "mac_desconectado_pela_tela", {});
+        // ADA-245: removido por outro lugar. O logout das contas já veio da puxada (contas-no-servidor.ts).
+        if (remover) await removerDaquiNoMac(remover, depsRemoverNoMac(false));
         await parar();
-        mensagem = "Este Mac foi desconectado pela tela do Nod.";
+        if (!remover || remover.manterConexao) mensagem = "Este Mac foi desconectado pela tela do Nod.";
         await mostrarSetup();
       },
       agendar: agendarTimer,
@@ -1164,6 +1169,34 @@ async function sairDaContaNoMac(impressao: string): Promise<boolean> {
   await sincronizarContas({ ia: local.ia });
   return true;
 }
+/**
+ * ADA-245 (jornada D): o disco e as ações da limpeza deste Mac (remover-daqui.ts). `comLogout` false = as contas já
+ * saíram pela puxada. O desligar não troca a janela: a tela de Fim da página ainda vai ao servidor e mostra o resultado;
+ * a tela de conectar volta na próxima abertura do app.
+ */
+function depsRemoverNoMac(comLogout: boolean): DepsRemoverDaqui {
+  return {
+    baseDasIas: pastasDoNod.base,
+    existe: async (caminho) => existsSync(caminho),
+    apagar: (caminho) => rm(caminho, { recursive: true, force: true }),
+    sairDasContas: async () => {
+      if (!comLogout) return true;
+      await sincronizandoContas;
+      let ok = true;
+      // Exceção = o logout falhou; false = a conta não estava aqui (nada a sair).
+      for (const c of contasLocais?.anuncio() ?? []) ok = (await sairDaContaNoMac(c.impressao).then(() => true, () => false)) && ok;
+      return ok;
+    },
+    desligar: async () => {
+      await parar();
+      await rm(caminhoConfig(), { force: true });
+      configuracao = null;
+      mensagem = "Este Mac saiu da sua conta. Conecte de novo para usar o nod aqui.";
+    },
+    // "Continuar ligado": para aqui e a conexão fica (conexao.enc); a próxima abertura do app conecta sem login.
+    parar: () => parar(),
+  };
+}
 function emitirContas(): void {
   janelaWeb()?.webContents.send(CANAIS_DESKTOP.contasMudaram, contasDoApp.listar() satisfies ContasNaTela[]);
 }
@@ -1565,6 +1598,19 @@ else {
     const homeDaMidia = () => cfgExecutor?.env.HOME ?? homedir();
     ipcMain.handle(CANAIS_MIDIA.maquina, (e): string | null => { validarRemetenteWeb(e); return maquinaIdAtual; });
     ipcMain.handle(CANAIS_DESKTOP.estaMaquina, (e): EstaMaquina | null => { validarRemetenteWeb(e); return estaMaquinaDe({ id: maquinaIdAtual, nome: hostname(), plataforma: process.platform }); }); // ADA-243
+    // ADA-245 (jornada D): "Remover o nod deste computador". Qual é este Mac vem do estaMaquina da ADA-243 (acima); o
+    // removerDaqui faz a limpeza local (remover-daqui.ts) com as opções validadas de novo. Sem fecharAposRemover no Mac.
+    ipcMain.handle(CANAIS_REMOVER.removerDaqui, async (e, opcoes: unknown): Promise<ResultadoRemoverDaqui> => {
+      validarRemetenteWeb(e);
+      const o = lerOpcoesRemover(opcoes);
+      if (!o) throw new Error("entrada_invalida");
+      if (conectando) throw new Error("ocupado");
+      conectando = true;
+      try {
+        log("info", "mac_removido_pela_tela", { manter_ias: String(o.manterIas), manter_conexao: String(o.manterConexao) });
+        return await removerDaquiNoMac(o, depsRemoverNoMac(true));
+      } finally { conectando = false; }
+    });
     ipcMain.handle(CANAIS_MIDIA.existe, async (e, caminho: unknown): Promise<boolean> => { validarRemetenteWeb(e); return (await arquivoDaMidia(caminho, homeDaMidia())) !== null; });
     ipcMain.handle(CANAIS_MIDIA.mostrarNoFinder, async (e, caminho: unknown): Promise<boolean> => {
       validarRemetenteWeb(e);

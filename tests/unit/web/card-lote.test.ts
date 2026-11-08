@@ -4,6 +4,7 @@ import type { Relato } from "../../../src/contracts/relato.ts";
 import { listaDoLoteParaSuaVez, renderCardLote } from "../../../web/telas/card-lote.ts";
 import { renderRelatos } from "../../../web/telas/relatos.ts";
 import { CONFIG_UI_INICIAL } from "../../../web/estado/reducer.ts";
+import { linhaDaAcao } from "../../../src/use-cases/gerir-bots.ts";
 
 /** O card do lote do Nod (ADR-082) e a tela Relatos com tipo e origem (0062). */
 const acao = (i: number, p: Partial<AcaoNoLote>): AcaoNoLote => ({ i, tipo: "criar", estado: "esperando", motivo: "manual", alvoNome: "Bot", botId: null, alvoDaAcao: null, ...p });
@@ -86,6 +87,36 @@ describe("card do lote do Nod", () => {
     expect(h).not.toContain('data-act="decidir-lote"');
     expect(h).toContain("não feito");
     expect(h).toContain("não deu certo (depende de acao recusada)");
+  });
+});
+
+describe("card de remover o nod de um computador (ADA-245, critério 4)", () => {
+  const remover = (p: Partial<AcaoNoLote>): PayloadPropostaLoteBots => ({ kind: "lote_bots", resumo: "Tirar o nod do Notebook", acoes: [acao(0, { tipo: "remover_computador", alvoNome: "Notebook", motivo: "ligar_total", maquina_id: "m1", manter_ias: false, manter_conexao: false, membros: ["Ana", "Bia"], ...p })] });
+
+  it("pergunta direta com o verbo no botão e nomeia quem assume os bots, como o diálogo da tela", () => {
+    const h = renderCardLote({ id: "p1" }, remover({ assume_nome: "MacBook de Ana" }), true);
+    expect(h).toContain("Remover o nod de Notebook?");
+    expect(h).toContain('data-act="decidir-lote"');
+    expect(h).toMatch(/>Remover</);
+    expect(h).toContain("Ana e Bia passam para MacBook de Ana");
+    expect(h).toContain("tira também o Claude e o ChatGPT que o nod instalou");
+    expect(h).toContain("sai da sua conta");
+    expect(h).not.toContain("computador padrão");
+  });
+
+  it("o único computador: ninguém assume, então o card diz que os bots esperam um computador (a prévia diz o mesmo)", () => {
+    const h = renderCardLote({ id: "p1" }, remover({ assume_nome: null, manter_ias: true, manter_conexao: true }), true);
+    expect(h).toContain("Ana e Bia esperam um computador");
+    expect(h).not.toContain("passam para");
+    expect(h).toContain("o Claude e o ChatGPT ficam lá");
+    expect(h).toContain("continua ligado à sua conta");
+  });
+
+  it("o recibo diz para quem os bots foram, ou que esperam um computador", () => {
+    const base = { tipo: "remover_computador" as const, alvoNome: "Notebook", membros: ["Ana"] };
+    expect(linhaDaAcao({ ...base, assume_nome: "PC do escritório" })).toBe("Remover o nod de Notebook (Ana passou para PC do escritório)");
+    expect(linhaDaAcao({ ...base, membros: ["Ana", "Bia"], assume_nome: null })).toBe("Remover o nod de Notebook (Ana e Bia esperam um computador)");
+    expect(linhaDaAcao({ ...base, membros: [], assume_nome: null })).toBe("Remover o nod de Notebook (sem bots)");
   });
 });
 

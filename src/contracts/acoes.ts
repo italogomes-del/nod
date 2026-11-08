@@ -89,4 +89,8 @@ export type DefinicaoAcao = {
  * O que só roda depois do commit da transação (o efeito fora do banco, ADR-135 §4). `importar_linear` (NOD-422): a
  * importação confirmada é trazida do Linear em segundo plano (não segura a resposta do Confirmar).
  */
-export type EfeitoAposCommit = { tipo: "desligar_computador"; agenteId: string } | { tipo: "importar_linear"; importacaoId: string };
+export type EfeitoAposCommit =
+  | { tipo: "desligar_computador"; agenteId: string }
+  | { tipo: "importar_linear"; importacaoId: string }
+  /** ADA-245: o computador removido sem o app dele na frente (outra tela, o chat): ligado, a limpeza vai na puxada; desligado, sai da conta agora. */
+  | { tipo: "remover_computador"; maquinaId: string; manterIas: boolean; manterConexao: boolean };

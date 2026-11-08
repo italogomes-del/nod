@@ -128,6 +128,7 @@ export type ComandoMotor =
   | { tipo: "estado" }
   | { tipo: "atualizar-ia"; ia: "claude" | "codex" }
   | { tipo: "versao" }
+  | { tipo: "desinstalar"; manterConexao: boolean; manterIas: boolean; json: boolean }
   | { tipo: "ajuda"; erro: string | null };
 
 /** `nod-motor [rodar] | parear <servidor> [--nome N] [--convite C] [--abrir] | entrar claude|codex|github | atualizar-ia claude|codex | estado | versao`. */
@@ -138,6 +139,13 @@ export function lerComando(args: readonly string[]): ComandoMotor {
   if (cmd === "rodar") return { tipo: "rodar" };
   if (cmd === "estado") return { tipo: "estado" };
   if (cmd === "versao" || cmd === "--version") return { tipo: "versao" };
+  if (cmd === "desinstalar") {
+    // ADA-245: só as três opções; qualquer outra recusa (um erro de digitação não pode virar "apagar tudo").
+    const conhecidas = new Set(["--manter-conexao", "--manter-ias", "--json"]);
+    const estranha = resto.find((a) => !conhecidas.has(a));
+    if (estranha) return { tipo: "ajuda", erro: `Opção desconhecida: ${estranha}` };
+    return { tipo: "desinstalar", manterConexao: resto.includes("--manter-conexao"), manterIas: resto.includes("--manter-ias"), json: resto.includes("--json") };
+  }
   if (cmd === "parear") {
     const servidor = resto.find((a, i) => !a.startsWith("--") && resto[i - 1] !== "--nome" && resto[i - 1] !== "--convite");
     const valor = (flag: string) => { const i = resto.indexOf(flag); return i >= 0 ? resto[i + 1] ?? null : null; };
@@ -168,6 +176,9 @@ export const AJUDA = `nod-motor — o motor do Nod nesta máquina (ADR-090)
                                                       — o jeito fácil é pela tela: Seu espaço › Provedores de IA
   nod-motor atualizar-ia claude | codex               atualiza a IA (no ~/.local, sem sudo); espera os turnos dela
   nod-motor estado                                    o servidor conectado e as IAs prontas
+  nod-motor desinstalar [--manter-conexao] [--manter-ias] [--json]
+                                                      remove o nod deste computador (Windows: a tarefa, as pastas e
+                                                      as IAs que o nod instalou; --manter-conexao guarda a conexão)
   nod-motor rodar                                     roda o motor (o serviço nod-motor faz isso sozinho)
 `;
 

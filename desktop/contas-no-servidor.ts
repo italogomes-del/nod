@@ -1,4 +1,5 @@
 import type { PuxadaDeContas } from "../src/contracts/contas-ia.ts";
+import type { OpcoesRemover } from "../src/contracts/remover-computador.ts";
 
 /**
  * O que a tela pede ao app do Mac sobre as contas (definido em 2026-10-13, ADR-102): "Sair do Mac" de uma conta e
@@ -18,8 +19,11 @@ export type DepsContasNoServidor = {
   sair(impressao: string): Promise<boolean>;
   /** As impressões de todas as contas logadas aqui (o "sair das contas" do desconectar). */
   todas(): string[];
-  /** O Mac foi desconectado pela tela: a conexão para e a tela de conectar volta. */
-  desconectar(): Promise<void>;
+  /**
+   * O Mac foi desconectado pela tela: a conexão para e a tela de conectar volta. ADA-245: `remover` = foi removido por
+   * outro lugar (outra tela, o chat) e a limpeza deste Mac (remover-daqui.ts) roda junto.
+   */
+  desconectar(remover?: OpcoesRemover): Promise<void>;
   agendar(fn: () => void, ms: number): { cancelar(): void };
   registrar?(evento: string, campos: Record<string, string>): void;
 };
@@ -51,6 +55,14 @@ export function iniciarContasNoServidor(d: DepsContasNoServidor): { parar(): voi
     if (parado) return;
     if (r === "sem_rota") return; // servidor sem contas (modo local ou antigo): nada a puxar
     if (r) {
+      // ADA-245: removido com "Continuar ligado": as contas ficam (sem logout), como no motor (motor/contas.ts). Vem sem
+      // `desconectar` (revisão do PR #694, desconectarNaPuxada): o app antigo ignoraria `remover` e sairia das contas.
+      if (r.remover?.manterConexao) {
+        await d.ponte.saiu([], true);
+        parado = true;
+        await d.desconectar(r.remover);
+        return;
+      }
       if (r.desconectar) {
         const todas = d.todas();
         const feitas = await sairDe(todas);
@@ -62,7 +74,7 @@ export function iniciarContasNoServidor(d: DepsContasNoServidor): { parar(): voi
         }
         await d.ponte.saiu(feitas, true);
         parado = true;
-        await d.desconectar();
+        await d.desconectar(r.remover);
         return;
       }
       if (r.sair.length > 0) await d.ponte.saiu(await sairDe(r.sair), false);

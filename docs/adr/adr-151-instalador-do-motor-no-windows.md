@@ -69,3 +69,14 @@ de código ainda): o SmartScreen pede "Mais informações › Executar assim mes
 `docs/release-desktop.md`. Link fixo `app.nodbot.ai/download/windows` (302 para o bucket `nodbot-downloads`).
 Gatilho de reversão: o SmartScreen ou o Defender bloqueando o `.exe` sem a opção de executar, ou o certificado
 comprado (aí o `.exe` passa a ser assinado com `signtool` antes do sha256).
+
+## Emenda ADA-245 (2026-11-08): um desinstalador só, com parâmetros
+
+`scripts/windows/desinstalar.ps1` substitui o `desinstalar-pelo-exe.ps1`: tira a tarefa agendada, a chave Run, os
+processos, o Path, `%LOCALAPPDATA%\nod` e `%APPDATA%\nod-motor`; `-ManterConexao` guarda `conexao.json` e `-ManterIas` as
+IAs. Só sai IA que o nod instalou: a instalação grava `%APPDATA%\nod-motor\ias-do-nod.json`. O `.exe` (NSIS) aceita
+`/MANTERIAS` e `/MANTERCONEXAO`, pergunta na janela e, com `/S`, guarda as duas (o comportamento da ADA-226). O app
+Electron limpa pelo `motor/desinstalar.ts` em modo "app" (o `nod-motor` roda de dentro da pasta que vai sumir) e o
+desinstalador do app chama `nod-motor desinstalar` no `customUnInstall` (fora da atualização). A puxada leva `remover`
+ao motor ligado que foi removido por outro lugar. Gatilho de reversão: o Defender barrando a limpeza destacada, ou a VM
+de QA (ADA-233) mostrando sobra depois do Fim.

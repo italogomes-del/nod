@@ -209,3 +209,26 @@ Com `NOD_ONBOARDING_TEXTO=1` no servidor, uma conta que já concluiu o onboardin
   reinstalar: volta. Reprova se: aparece a cada abertura ou nunca mais depois da reinstalação limpa.
 - [ ] **Pelo chat.** Pedir a um bot "trabalha neste computador a partir de agora": ele pergunta qual máquina (lista pelo
   nome) ou, com o nome, muda a padrão (`maquinas.definir_padrao`); a tela de computadores mostra o mesmo estado.
+
+## L. Remover o nod deste computador (ADA-245, jornada D)
+
+**Só com `NOD_ONBOARDING_TEXTO=1` no servidor** (a flag fica desligada até este roteiro passar). Em **Computadores**,
+menu **…** do próprio computador, **Remover**. A spec é [onboarding-jornada-d](specs/onboarding-jornada-d.md).
+
+- [ ] **Diálogo com os números de verdade.** Observar: o texto diz quantos bots rodam aqui e o nome do computador que
+  assume (ou "esperam um computador", se for o único). Reprova se: número ou nome não batem com **Computadores**, ou
+  aparece "motor", "máquina", "chave" ou "parear".
+- [ ] **Windows, tudo marcado como padrão** (Tirar também ✓, Continuar ligado ✗). Observar no PowerShell, depois do Fim:
+  `Get-ScheduledTask -TaskName 'nod*'` vazio; `Test-Path $env:LOCALAPPDATA\nod` e `Test-Path $env:LOCALAPPDATA\nod-motor`
+  falsos; `Test-Path $env:USERPROFILE\.local\bin\claude.cmd` falso; o computador some de **Computadores** e
+  reinstalar pede login. Reprova se: algum sobra, ou a tela de Fim fecha sozinha.
+- [ ] **Windows, Tirar também ✗ e Continuar ligado ✓.** Observar: `claude.cmd` continua; `%LOCALAPPDATA%\nod\conexao.json`
+  continua; reinstalar conecta sem login. Reprova se: pede login ou some o `claude.cmd`.
+- [ ] **Fechar no Windows encerra o app.** Observar: **Fechar** na tela de Fim fecha a janela e o processo. Reprova se:
+  o app fica aberto ou volta para a tela de conexão.
+- [ ] **Mac.** Observar: com Tirar também ✓, `ls ~/Library/Application\ Support/nod/ferramentas` sem a IA que o nod
+  instalou; o `.app` continua em **Aplicativos**; o computador sai de **Computadores**. **Fechar** volta para
+  Computadores. Reprova se: o `.app` some, a IA fica, ou o computador segue na lista.
+- [ ] **Pelo chat.** Observar: "remova o nod do <nome>" mostra o card **Remover o nod de <nome>?**; **Remover** chega
+  ao mesmo estado da tela (bots no padrão, computador fora da lista, limpeza em instantes se ligado). Reprova se: roda
+  sem o card ou o estado difere.

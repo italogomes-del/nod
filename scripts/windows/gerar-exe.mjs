@@ -37,7 +37,7 @@ function argumento(nome, padrao) {
 export function gerarExe({ saida, versao }) {
   const trabalho = mkdtempSync(join(tmpdir(), "nod-exe-"));
   try {
-    for (const f of ["instalador.nsi", "instalar-pelo-exe.ps1", "desinstalar-pelo-exe.ps1"]) copyFileSync(join(AQUI, f), join(trabalho, f));
+    for (const f of ["instalador.nsi", "instalar-pelo-exe.ps1", "desinstalar.ps1"]) copyFileSync(join(AQUI, f), join(trabalho, f));
     writeFileSync(join(trabalho, "nod.ico"), icoDePng(readFileSync(join(RAIZ, "desktop", "resources", "icon.png"))));
     mkdirSync(saida, { recursive: true });
     const exe = join(saida, NOME_DO_EXE);

@@ -13,6 +13,7 @@ import type { ContaLocal, ContasLocais, IdentidadeDaConta } from "../desktop/con
 import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLoginNoApp, comandoDeLogout, logadoPeloStatus, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "../desktop/login-ia.ts";
 import type { PassoDoPreparo, PreparoNoMotor } from "./preparo-do-login.ts";
+import type { OpcoesRemover } from "../src/contracts/remover-computador.ts";
 
 /**
  * As contas de IA no motor da VM (definido em 2026-10-13, ADR-102): a puxada do que a tela pediu (logins, saídas,
@@ -104,8 +105,11 @@ export type DepsContasDoMotor = {
   arquivo: string;
   /** As contas mudaram (login, logout, terminal): reanunciar ao servidor. */
   reanunciar(): Promise<void>;
-  /** A pessoa desconectou a máquina pedindo para sair das contas: depois de sair, o motor apaga a conexão e para. */
-  desconectar(): Promise<void>;
+  /**
+   * A pessoa desconectou a máquina pedindo para sair das contas: depois de sair, o motor apaga a conexão e para.
+   * ADA-245: com `remover` (o nod removido deste computador por outro lugar), roda também a limpeza local.
+   */
+  desconectar(remover?: OpcoesRemover): Promise<void>;
   /** NOD-9 PR4: a tela pediu para atualizar a IA desta máquina (o botão "Atualizar"); quem atualiza aplica o limite. */
   atualizar?(ia: IaComConta): void;
   /**
@@ -320,6 +324,15 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
     const r = await d.ponte.puxar();
     if (r === "sem_rota") { log("info", "motor_contas_sem_rota", {}); return "parar"; }
     if (!r) return "seguir";
+    if (r.remover?.manterConexao) {
+      // ADA-245: "Continuar ligado à minha conta": o computador fica na conta, então as contas das IAs também ficam
+      // (nada de logout nem de apagar a conexão). Só a limpeza local do programa/IAs, e a confirmação ao servidor.
+      // Revisão do PR #694: vem SEM `desconectar` (desconectarNaPuxada), para o motor antigo não sair das contas.
+      await d.ponte.saiu([], true);
+      log("info", "motor_removido_mantendo_conexao", {});
+      await d.desconectar(r.remover);
+      return "parar";
+    }
     if (r.desconectar) {
       const todas = d.contas.listar().filter((c) => c.impressao !== null).map((c) => c.impressao!);
       const feitas = await sairDe(todas);
@@ -328,7 +341,7 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
       if (feitas.length < todas.length) { await d.ponte.saiu(feitas, false); return "seguir"; }
       await d.ponte.saiu(feitas, true);
       log("info", "motor_desconectado_pela_pessoa", { contas: feitas.length });
-      await d.desconectar();
+      await d.desconectar(r.remover);
       return "parar";
     }
     for (const ia of r.atualizar ?? []) d.atualizar?.(ia);

@@ -36,6 +36,7 @@ async function montar(o: { logoutFalha?: boolean; preparo?: PreparoNoMotor; resp
   const respostas: (PuxadaDeContas | "sem_rota")[] = [];
   let reanuncios = 0;
   let desconectou = false;
+  let remocao: unknown = "nenhuma";
   const atualizar: string[] = [];
   const motor = iniciarContasDoMotor({
     ponte: {
@@ -45,7 +46,7 @@ async function montar(o: { logoutFalha?: boolean; preparo?: PreparoNoMotor; resp
     },
     contas, clis, arquivo,
     reanunciar: async () => { reanuncios++; },
-    desconectar: async () => { desconectou = true; },
+    desconectar: async (remover) => { desconectou = true; remocao = remover; },
     atualizar: (ia) => { atualizar.push(ia); },
     ...(o.preparo ? { preparo: o.preparo } : {}),
     agora: Date.now,
@@ -56,7 +57,7 @@ async function montar(o: { logoutFalha?: boolean; preparo?: PreparoNoMotor; resp
     const ate = Date.now() + ms;
     while (!cond()) { if (Date.now() > ate) throw new Error("tempo"); await new Promise((r) => setTimeout(r, 20)); }
   };
-  return { contas, progresso, saidas, respostas, esperar, arquivo, atualizar, get reanuncios() { return reanuncios; }, get desconectou() { return desconectou; } };
+  return { contas, progresso, saidas, respostas, esperar, arquivo, atualizar, get reanuncios() { return reanuncios; }, get desconectou() { return desconectou; }, get remocao() { return remocao; } };
 }
 
 /** Um login completo pela tela (o código certo), até o `pronto`. */
@@ -130,6 +131,15 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     m.respostas.push({ logins: [], sair: [], desconectar: true });
     await m.esperar(() => m.desconectou);
     expect(m.saidas).toEqual([{ impressoes: [], desconectada: true }]);
+    expect(m.remocao).toBeUndefined();
+  });
+
+  it("ADA-245: desconectar com 'remover' leva as opções da limpeza local ao motor", async () => {
+    const m = await montar();
+    m.respostas.push({ logins: [], sair: [], desconectar: true, remover: { manterIas: true, manterConexao: false } });
+    await m.esperar(() => m.desconectou);
+    expect(m.saidas).toEqual([{ impressoes: [], desconectada: true }]);
+    expect(m.remocao).toEqual({ manterIas: true, manterConexao: false });
   });
 
   it("desconectar depois de um login: sai da conta (logout na pasta) e confirma a impressão", async () => {
@@ -139,6 +149,16 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     await m.esperar(() => m.desconectou);
     expect(m.saidas).toEqual([{ impressoes: [impressaoEsperada], desconectada: true }]);
     expect(m.contas.anuncio()).toEqual([]);
+  });
+
+  it("ADA-245: remover com 'Continuar ligado' não sai das contas (sem logout) e leva as opções ao motor", async () => {
+    const m = await montar();
+    await logar(m);
+    m.respostas.push({ logins: [], sair: [], desconectar: false, remover: { manterIas: false, manterConexao: true } });
+    await m.esperar(() => m.desconectou);
+    expect(m.saidas).toEqual([{ impressoes: [], desconectada: true }]);
+    expect(m.remocao).toEqual({ manterIas: false, manterConexao: true });
+    expect(m.contas.anuncio()).toEqual([expect.objectContaining({ impressao: impressaoEsperada, estado: "pronta" })]);
   });
 
   it("revisão do PR #306: logout que falha não é confirmado (a saída fica pendente e a conta continua anunciada)", async () => {

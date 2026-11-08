@@ -203,3 +203,20 @@
 @media (prefers-reduced-motion: reduce) { .lc-switch, .lc-switch > span, .lc-seta { transition: none; } }
 .mc-faixa-neutro > i { background: var(--line-strong); }
 .mc-faixa-ok > i { background: var(--success); }
+/* ADA-245 (jornada D, prancha D2/D3): o diálogo "Remover o nod deste computador?" e a tela de Fim. */
+.rm-dialogo { width: min(440px, calc(100vw - 32px)); }
+/* foco-ok: o título recebe o foco só pelo código, ao abrir o diálogo; não é um controle */
+.rm-dialogo h3:focus { outline: none; }
+.rm-dialogo .rm-caixa { margin: 10px 0 0; font-size: 13.5px; line-height: 1.4; }
+.rm-fim { max-width: 620px; }
+/* foco-ok: o título recebe o foco só pelo código, ao abrir a tela de Fim; não é um controle */
+.rm-fim h2:focus { outline: none; }
+.rm-fim-onde { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.rm-lista { list-style: none; margin: 20px 0 24px; padding: 0; }
+.rm-item { display: grid; grid-template-columns: 28px 1fr; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.rm-item:last-child { border-bottom: 1px solid var(--line); }
+.rm-item small { display: block; font-size: 13px; color: var(--ink-3); }
+.rm-marca { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; justify-self: center; font-size: 11px; font-weight: 700; background: var(--surface-side); color: var(--ink-3); }
+.rm-feito .rm-marca { color: var(--success); }
+.rm-falhou .rm-marca { color: var(--danger); }
+.rm-fim-acoes .bt { min-height: 44px; padding: 0 22px; }

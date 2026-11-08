@@ -26,9 +26,10 @@ export type ModoLogin = "stub" | "google";
 /** Pessoa que o login de desenvolvimento oferece (vem do cadastro, nunca fixa no código). */
 export type PessoaDoStub = { tenantId: string; id: string; nome: string };
 
-export type OpcoesSessao =
+export type OpcoesSessao = (
   | { modo: "stub"; pessoas?: () => Promise<PessoaDoStub[]> }
-  | { modo: "google"; google: ConfigGoogle };
+  | { modo: "google"; google: ConfigGoogle }
+) & { /** ADA-245: liga as telas novas do onboarding; ausente = NOD_ONBOARDING_TEXTO. */ onboardingTexto?: boolean };
 
 // ---------------------------------------------------------------------------------------------
 // Configuração segura (E1.5/E1.6, ADR-030): o que o servidor RECUSA antes de escutar.
@@ -120,7 +121,8 @@ export function criarSessao(segredo: string, opcoes: OpcoesSessao = { modo: "stu
       },
     },
   ];
-  const extraModo = contas ? { contas: { google: contas.google, bootstrap: contas.bootstrap, ...(contas.minhaConta ? { minhaConta: true } : {}), ...(contas.onboardingTexto ? { onboardingTexto: true } : {}) } } : {};
+  // ADA-245: NOD_ONBOARDING_TEXTO=1 liga as telas novas do onboarding (Computadores, Remover o nod deste computador).
+  const extraModo = { ...(contas ? { contas: { google: contas.google, bootstrap: contas.bootstrap, ...(contas.minhaConta ? { minhaConta: true } : {}), ...(contas.onboardingTexto ? { onboardingTexto: true } : {}) } } : {}), ...(opcoes.onboardingTexto ?? process.env.NOD_ONBOARDING_TEXTO === "1" ? { onboardingTexto: true as const } : {}) };
   const seguro = opcoes.modo === "google" && opcoes.google.redirectUri.startsWith("https://");
   /** Cunha o cookie da pessoa: com contas, cria a sessão no banco e põe o sid. */
   const cookiePara = async (escopo: Escopo, req: IncomingMessage, maxAgeS?: number): Promise<string> => {

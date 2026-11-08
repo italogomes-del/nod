@@ -6,6 +6,7 @@ import { hostname, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arquivoDaConexao, carregarConexao, carregarMaquinaDoMotor, guardarConexao, pastaDoMotor, type ConexaoMotor } from "../../motor/conexao.ts";
+import { depsDeVerdade, desinstalar } from "../../motor/desinstalar.ts";
 import { criarAtualizacaoDoApp, linhaDaAtualizacao, servidorDeAtualizacao, TEXTOS_ATUALIZACAO, type AtualizacaoDoApp } from "../atualizacao.ts";
 import { pedirProvisorio, segredoDeTroca, servidorOfereceProvisorio, trocarChaveDoApp, verificadorNovo, verificadorValido } from "../conta-provisoria.ts";
 import { esteComputadorEm } from "../este-computador.ts";
@@ -13,6 +14,8 @@ import { criarGoogleNoApp } from "../google-conta.ts";
 import { lerIaDesktop } from "../ia-mac.ts";
 import { abreNoNavegador } from "../links-externos.ts";
 import { CANAIS_DESKTOP } from "../../src/contracts/desktop.ts";
+import { CANAIS_REMOVER, type ResultadoRemoverDaqui } from "../../src/contracts/remover-computador.ts";
+import { lerOpcoesRemover } from "../../src/shared/opcoes-remover.ts";
 import type { EstaMaquina } from "../../src/contracts/desktop-esta-maquina.ts";
 import { estaMaquinaDe } from "../../src/domain/esta-maquina.ts";
 import { abrirInstalacao, daJanelaWeb, entrarNaIa } from "./login-ia-windows.ts";
@@ -45,6 +48,8 @@ let ocupado = false;
 let cancelarPareamento = false;
 let saindo = false;
 let atualizacao: AtualizacaoDoApp | null = null;
+/** ADA-245: o "Remover o nod deste computador" já limpou: nada religa nem reinstala o motor; só o Fechar resta. */
+let removido = false;
 
 const registrar = (evento: string, campos: Record<string, string | number | boolean | null> = {}) => {
   process.stdout.write(`${JSON.stringify({ t: new Date().toISOString(), evento, ...campos })}\n`);
@@ -122,7 +127,7 @@ async function lerMotor(): Promise<EstadoDoMotor> {
 }
 
 async function abrir() {
-  if (ocupado) return;
+  if (ocupado || removido) return;
   ocupado = true;
   try {
     if (!janela || janela.isDestroyed() || !janela.isVisible()) mostrar({ tela: "abrindo" });
@@ -327,11 +332,46 @@ else {
       const r: EstaMaquina | null = estaMaquinaDe({ id: m?.id, nome: hostname(), plataforma: "win32" });
       return r;
     });
+    // ADA-245 (jornada D): "Remover o nod deste computador", só da página do servidor conectado.
+    //  - qual é este computador vem do estaMaquina da ADA-243 (acima: o maquina.json que o motor grava ao conectar);
+    //  - removerDaqui: a mesma limpeza do `nod-motor desinstalar` (motor/desinstalar.ts) rodando AQUI, no modo "app":
+    //    o app mora em %LOCALAPPDATA%\Programs\nod, fora da pasta que sai, então espera e confere no disco. Um
+    //    `nod-motor desinstalar` rodaria do node.exe de dentro da pasta (e o modo "app" o mataria no meio);
+    //  - fecharAposRemover: tira o próprio app de Aplicativos (o desinstalador do NSIS, /S; o motor já saiu, então o
+    //    customUnInstall de app-desinstalar.nsh não roda) e encerra.
+    ipcMain.handle(CANAIS_REMOVER.removerDaqui, async (e, opcoes: unknown): Promise<ResultadoRemoverDaqui> => {
+      if (!daJanela(e)) throw new Error("origem_invalida");
+      const o = lerOpcoesRemover(opcoes);
+      if (!o) throw new Error("entrada_invalida");
+      if (ocupado) throw new Error("ocupado");
+      ocupado = true;
+      try {
+        registrar("remover_daqui", { manterIas: o.manterIas, manterConexao: o.manterConexao });
+        removido = true;
+        const { itens } = await desinstalar(o, depsDeVerdade({ modo: "app", pastaDaConexao: pastaMotor() }));
+        registrar("remover_daqui_fim", { itens: itens.map((i) => `${i.id}:${i.estado}`).join(",") });
+        motor = "desconhecido";
+        atualizarBandeja();
+        return { itens };
+      } finally { ocupado = false; }
+    });
+    // Revisão do PR #694: devolve se encerra. Sem remoção aqui (a ponte recusou: "ocupado" com Abrir/conectar no meio),
+    // false, e a tela de Fim volta a Computadores em vez de ficar presa.
+    ipcMain.handle(CANAIS_REMOVER.fecharAposRemover, (e): boolean => {
+      if (!daJanela(e)) throw new Error("origem_invalida");
+      if (!removido) return false;
+      const desinstalador = join(dirname(process.execPath), "Uninstall nod.exe");
+      if (app.isPackaged && existsSync(desinstalador)) spawn(desinstalador, ["/S"], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+      registrar("remover_daqui_fechar", { desinstalador: existsSync(desinstalador) });
+      saindo = true;
+      app.quit();
+      return true;
+    });
     bandeja = new Tray(icone().resize({ width: 16, height: 16 }));
     bandeja.on("click", () => { if (janela && !janela.isDestroyed()) janela.show(); else void abrir(); });
     atualizacao = montarAtualizacao();
     atualizarBandeja();
-    setInterval(() => { if (conexao) void lerMotor(); }, INTERVALO_DO_VIGIA_MS).unref();
+    setInterval(() => { if (conexao && !removido) void lerMotor(); }, INTERVALO_DO_VIGIA_MS).unref();
     registrar("app_aberto", { versao: app.getVersion() });
     void abrir();
   });

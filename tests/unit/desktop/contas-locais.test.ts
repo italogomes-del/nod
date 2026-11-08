@@ -318,6 +318,19 @@ describe("puxada de contas no app do Mac (ADR-102)", () => {
     expect(puxadas).toBe(1);
   });
 
+  it("ADA-245: removido por outro lugar leva as opções ao desconectar; com 'Continuar ligado' não sai das contas", async () => {
+    for (const remover of [{ manterIas: false, manterConexao: false }, { manterIas: true, manterConexao: true }]) {
+      const saiu: unknown[] = [];
+      const sairam: string[] = [];
+      let recebido: unknown = "nada";
+      iniciarContasNoServidor({ ponte: { puxar: async () => ({ logins: [], sair: [], desconectar: !remover.manterConexao, remover }), saiu: async (i, d) => { saiu.push({ i, d }); return true; } }, sair: async (i) => { sairam.push(i); return true; }, todas: () => ["c".repeat(64)], desconectar: async (r) => { recebido = r; }, agendar });
+      await esperar(() => recebido !== "nada");
+      expect(recebido).toEqual(remover);
+      expect(sairam).toEqual(remover.manterConexao ? [] : ["c".repeat(64)]);
+      expect(saiu).toEqual([{ i: remover.manterConexao ? [] : ["c".repeat(64)], d: true }]);
+    }
+  });
+
   it("servidor sem contas (404): para de puxar", async () => {
     let puxadas = 0;
     iniciarContasNoServidor({ ponte: { puxar: async () => { puxadas++; return "sem_rota"; }, saiu: async () => true }, sair: async () => true, todas: () => [], desconectar: async () => undefined, agendar });

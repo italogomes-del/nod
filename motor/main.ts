@@ -45,6 +45,8 @@ import { diretorioPadrao } from "../desktop/contas-mac.ts";
 import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
 import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor } from "./contas.ts";
+import { depsDeVerdade, desinstalar } from "./desinstalar.ts";
+import type { OpcoesRemover } from "../src/contracts/remover-computador.ts";
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
 import { anuncioDoComputador, sondaLocal } from "./computador.ts";
 import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
@@ -381,13 +383,23 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     clis,
     arquivo: arquivoContas,
     reanunciar: () => vigiaAtual.reanunciar(),
-    desconectar: async () => {
+    desconectar: async (remover?: OpcoesRemover) => {
       // A pessoa desconectou a máquina na tela: a conexão sai daqui e o motor para (código 2: o systemd não reinicia).
       // QA do PR #306 (ISSUE-007): marca antes de parar — a chave já caiu, e o 401 do laço não pode virar "chave inválida".
       desconectada = true;
-      await rm(arquivoDaConexao(pasta), { force: true });
+      if (!remover) {
+        await rm(arquivoDaConexao(pasta), { force: true });
+        fim("desconectada");
+        void parar();
+        return;
+      }
+      // ADA-245 (jornada D): o nod foi removido deste computador por outro lugar (outra tela, o chat). Para tudo e roda a
+      // mesma limpeza do `nod-motor desinstalar`; o "fim" vem depois dela, senão o processo sai no meio.
+      if (!remover.manterConexao) await rm(arquivoDaConexao(pasta), { force: true }).catch(() => undefined);
+      await parar();
+      const r = await desinstalar(remover, depsDeVerdade({ modo: "servico", pastaDaConexao: pasta })).catch(() => null);
+      log("info", "motor_removido_pela_pessoa", { itens: r?.itens.map((i) => `${i.id}:${i.estado}`).join(",") ?? "erro" });
       fim("desconectada");
-      void parar();
     },
     aoSairDaConta: descartarDriverDaConta,
     atualizar: (ia) => { void pedirAtualizacao(ia, "tela"); },
@@ -663,6 +675,18 @@ async function estado(): Promise<number> {
   return 0;
 }
 
+/**
+ * ADA-245 (jornada D): `nod-motor desinstalar` no terminal. A tarefa para, as IAs e a conexão saem conforme as opções, e
+ * a pasta do programa sai segundos depois de este processo terminar (ele roda de dentro dela). Com --json, a mesma lista
+ * de itens da ponte do app (`{ itens }`). Código 0 sem nenhum item "falhou"; 1 com algum.
+ */
+async function desinstalarDaqui(c: { manterConexao: boolean; manterIas: boolean; json: boolean }): Promise<number> {
+  const r = await desinstalar({ manterConexao: c.manterConexao, manterIas: c.manterIas }, depsDeVerdade({ modo: "terminal", pastaDaConexao: pastaDoMotor(process.env) }));
+  if (c.json) process.stdout.write(`${JSON.stringify({ itens: r.itens })}\n`);
+  else for (const i of r.itens) process.stdout.write(`${i.estado === "feito" ? "ok" : i.estado === "mantido" ? "--" : "!!"} ${i.texto}\n`);
+  return r.itens.some((i) => i.estado === "falhou") ? 1 : 0;
+}
+
 const comando = lerComando(process.argv.slice(2));
 const saida =
   comando.tipo === "rodar" ? rodar()
@@ -670,6 +694,7 @@ const saida =
   : comando.tipo === "entrar" ? entrar(comando.ia)
   : comando.tipo === "estado" ? estado()
   : comando.tipo === "atualizar-ia" ? atualizarIa(comando.ia)
+  : comando.tipo === "desinstalar" ? desinstalarDaqui(comando)
   : comando.tipo === "versao" ? versaoDoMotor().then((v) => { process.stdout.write(`${v}\n`); return 0; })
   : Promise.resolve((process.stdout.write(`${comando.erro ? `${comando.erro}\n\n` : ""}${AJUDA}`), comando.erro ? 1 : 0));
 saida.then((codigo) => process.exit(codigo), (e: unknown) => { process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`); process.exit(1); });

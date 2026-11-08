@@ -31,4 +31,6 @@ nsis:
   shortcutName: nod
   runAfterFinish: true
   deleteAppDataOnUninstall: false
+  # ADA-245: desinstalar o app (Aplicativos, ou o Fechar do "Remover o nod deste computador") remove também o motor.
+  include: scripts/windows/app-desinstalar.nsh
 publish: null
