@@ -11,6 +11,7 @@ import { mudancasDaTarefa, statusNoDestino } from "../domain/historico-tarefa.ts
 import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, recusaDoLimite, resolverTarefa, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminadaDepois, terminou } from "../domain/quadro.ts";
 import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, COLUNAS_PADRAO, papelDe, responsavelDe } from "../domain/colunas.ts";
 import { TAREFA_PASSOU_A_VOCE } from "../domain/comentarios-quadro.ts";
+import { ERROS_FALA, type Fala } from "../domain/fala-da-pessoa.ts";
 import { ERRO_IMPORTACAO_PARADA, identificadorDaUrl, importacaoParada } from "../domain/importar-linear.ts";
 import { resumoDoPr } from "../domain/prs-da-tarefa.ts";
 import type { FotoLote } from "../repositories/quadros.repo.ts";
@@ -87,6 +88,11 @@ export type PedidoLote = {
    * outros cards abertos do mesmo quadro fecham (este o caso de uso fecha como confirmado). Só o caso de uso põe.
    */
   exclusaoConfirmada?: string;
+  /**
+   * ADA-15 (ADR-154): as falas da pessoa no turno de quem chamou (a de origem e as absorvidas), para os passos
+   * `pela_fala`. Só o gerir_quadro põe, e só num turno da conversa com a pessoa; ausente = nenhum `pela_fala` vale.
+   */
+  falas?: readonly Fala[] | null;
 };
 
 /** `entregue`: o recado entra no próximo passo (agora), quando o trabalho da fila começar, ou virou um trabalho novo. */
@@ -320,6 +326,10 @@ export async function montarQuadro(deps: Pick<Deps, "repos" | "agora" | "escopo"
     execucao: ["fazendo", "afazer"].includes(papelDe(colunas, t.status)) || (responsavelDe(colunas, t.status) && acionaNaColuna(colunas, t.status)) ? execucaoDoTurno(t.turnoId ? estados.get(t.turnoId) : null) : null,
     trabalhandoDesde: t.turnoId ? desdes.get(t.turnoId) ?? null : null,
     agenteNome: t.agenteId ? nomes.get(t.agenteId) ?? null : null,
+    // ADA-15: "Respondido no chat com <bot> · ver mensagem". A conversa e a mensagem são da dona: quem só participa vê o
+    // bot, sem o link (ele não abre a conversa de outra pessoa).
+    respostaAgenteNome: t.respostaAgenteId ? nomes.get(t.respostaAgenteId) ?? null : null,
+    ...(leitor !== donaId ? { respostaMensagemId: null, respostaConversaId: null } : {}),
     ...(extras.get(t.id) ?? {}),
     prs: prs.get(t.id) ?? [],
     linhas: linhas.get(t.id) ?? [],
@@ -1057,6 +1067,21 @@ function fechoDaMeta(q: { meta: string | null; prazo: string | null; metaDesde: 
   return { cumpridoEm: anterior.cumpridoEm ?? agora, resumo: anterior.cumpridoEm !== null && anterior.resumo ? anterior.resumo : resumoDaMeta({ prazo: q.prazo, colunas }, daMeta, nomes, agora) };
 }
 
+/** ADA-15: quando cada tarefa que espera a pessoa foi posta lá (a pergunta do card), em epoch ms. */
+async function perguntasDoQuadro(deps: Deps, quadroId: string, tarefas: readonly TarefaQuadro[]): Promise<Map<string, number>> {
+  const entradas = new Map((await deps.repos.quadros.entradasNaEspera(quadroId)).map((m) => [m.tarefaId, m.criadoEm]));
+  return new Map(tarefas.filter((t) => t.status === "voce" || t.status === "bloqueado").map((t) => [t.id, entradas.get(t.id) ?? t.mudadoEm]));
+}
+
+/** ADA-15 (revisão do PR #696): por tarefa, as falas do turno que já autorizaram um passo nela (uma fala, um passo). */
+async function falasUsadas(deps: Deps, tarefas: readonly TarefaQuadro[], falas: readonly Fala[]): Promise<Map<string, Set<string>>> {
+  const usadas = new Map<string, Set<string>>();
+  for (const u of await deps.repos.quadros.falasUsadas(tarefas.map((t) => t.id), falas.map((f) => f.id))) {
+    usadas.set(u.tarefaId, (usadas.get(u.tarefaId) ?? new Set()).add(u.mensagemId));
+  }
+  return usadas;
+}
+
 async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, agentes: readonly Agente[], nasceuAgora: boolean): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   const repo = deps.repos.quadros;
   const agora = deps.agora();
@@ -1082,7 +1107,12 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   const tarefaDoTurno = autorAgenteId && p.turnoId && p.ops.some((o) => o.tipo === "terminei" && !o.tarefa) ? await tarefaDoTurnoDe(deps, tarefasAntes, autorAgenteId, p.turnoId) : null;
   const historico = await historicoDoLote(deps, q.id, p.ops, tarefasAntes);
   const acionamentosNaHora = await repo.acionamentosNaHora(q.id);
-  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel, turnoConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora });
+  // ADA-15 (ADR-154): `pela_fala` só no lote do bot da dona, no turno da conversa com ela (nunca pela porta, sob procuração
+  // ou pela tela). A hora da pergunta de cada tarefa que espera é o movimento que a pôs lá (o mudado_em, sem movimento).
+  const comFala = p.ops.some((o) => "pela_fala" in o && o.pela_fala === true);
+  if (comFala && (p.autor.tipo !== "agente" || !p.autorNaConversa || p.pedidoPor || p.porProcuracao || !p.falas)) return falha("nao_permitido", ERROS_FALA.semFala);
+  const falas = comFala ? { doTurno: p.falas ?? [], perguntaEm: await perguntasDoQuadro(deps, q.id, tarefasAntes), usadas: await falasUsadas(deps, tarefasAntes, p.falas ?? []) } : null;
+  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel, turnoConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora, falas });
   if ("erro" in plano) {
     // O quadro que nasceu neste lote não fica de pé sem o resto (tudo ou nada). Não acontece: criarComLote já planejou.
     if (nasceuAgora) await repo.apagar(q.id);
@@ -1287,7 +1317,9 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     if (!final || !pedido) continue;
     historicoDasTarefas.push(...mudancasDaTarefa({ tarefaId: real, antes: antesPorId.get(real) ?? null, pedido, final, autor: p.autor, statusPorRegra: plano.porRegra.has(id) }));
   }
-  await registrarHistoricoComTrilha(deps, q.id, historicoDasTarefas, lote?.id ?? null);
+  // ADA-15: o passo que a fala da pessoa autorizou leva o id da mensagem no histórico da tarefa.
+  const comMensagem = historicoDasTarefas.map((m) => { const f = plano.pelaFala.get(m.tarefaId); return f ? { ...m, mensagemId: f.id } : m; });
+  await registrarHistoricoComTrilha(deps, q.id, comMensagem, lote?.id ?? null);
   const atualizado = (await repo.buscar(q.id)) ?? q;
   events.unshift(eventoQuadro(deps, p, atualizado, lote?.id ?? null, tarefaIds));
   // NOD-415 (ADR-141): o risco de prazo (só com meta e prazo), uma vez por (quadro, meta, prazo).

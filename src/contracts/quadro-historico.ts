@@ -14,7 +14,8 @@ export type AutorHistorico = AutorLote | { tipo: "regra" };
 export type CampoHistorico = "criada" | "status" | "agente" | "quadro" | "restaurada" | "linear";
 
 /** Uma mudança da tarefa. `de`/`para` = o id da coluna (status), do bot (agente; null = ninguém) ou do quadro. */
-export type MudancaTarefa = { tarefaId: string; campo: CampoHistorico; de: string | null; para: string | null; autor: AutorHistorico };
+/** `mensagemId` (ADA-15, ADR-154): a fala da pessoa que autorizou o passo. */
+export type MudancaTarefa = { tarefaId: string; campo: CampoHistorico; de: string | null; para: string | null; autor: AutorHistorico; mensagemId?: string | null };
 
 /** A linha do histórico como a tela a recebe: com os nomes já resolvidos. */
 export type EntradaHistoricoDto = {

@@ -55,6 +55,9 @@ export interface LinhaAchada {
   criado_em_txt: string;
 }
 
+/** ADA-15: uma fala da pessoa que pode autorizar um passo do quadro. */
+export type FalaDaPessoa = { id: string; conversaId: string; texto: string; criadoEm: number };
+
 export const COLUNAS_MENSAGEM =
   "tenant_id, id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, criado_em, assunto";
 
@@ -356,6 +359,24 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
         select texto from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and autor_tipo = 'pessoa' and autor_id = ${escopo.pessoaId} and kind = 'texto'
         order by criado_em desc, id desc limit ${limite}`;
       return linhas.map((l) => l.texto);
+    },
+
+    /**
+     * ADA-15 (ADR-154): as falas da pessoa que valem como aprovação neste turno, na ordem: a que abriu o turno
+     * (`mensagem_origem_id`) e as que entraram nele enquanto rodava (turnos absorvidos por ele). Só texto da própria pessoa,
+     * sem procuração, confiável e na conversa do turno: fala de outro bot, de página ou de outra conversa nunca aparece.
+     */
+    async falasDaPessoaNoTurno(turnoId: string, conversaId: string): Promise<FalaDaPessoa[]> {
+      const ls = await conn<{ id: string; conversa_id: string; texto: string; criado_em: Date }[]>`
+        select m.id, m.conversa_id, m.texto, m.criado_em from mensagens m
+        where m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${conversaId}
+          and m.autor_tipo = 'pessoa' and m.autor_id = ${escopo.pessoaId} and m.sob_procuracao_de is null
+          and m.confianca = 'confiavel' and m.kind = 'texto'
+          and m.id in (select t.mensagem_origem_id from turnos t
+                        where t.tenant_id = ${escopo.tenantId} and t.mensagem_origem_id is not null and t.conversa_id = ${conversaId}
+                          and (t.id = ${turnoId} or t.absorvido_por = ${turnoId}))
+        order by m.criado_em, m.id`;
+      return ls.map((l) => ({ id: l.id, conversaId: l.conversa_id, texto: l.texto, criadoEm: l.criado_em.getTime() }));
     },
 
     /** Em ordem de criação; `limite` corta pelas mais recentes (a resposta volta crescente). */

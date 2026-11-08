@@ -80,7 +80,7 @@ export const ACOES_QUADRO = [
   {
     id: "quadro.mudar_tarefa",
     titulo: "Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro",
-    schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir, sem_iniciar: P.sem_iniciar, motivo: P.motivo }, ["tarefa"]),
+    schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir, sem_iniciar: P.sem_iniciar, motivo: P.motivo, pela_fala: P.pela_fala, mensagem_id: P.mensagem_id }, ["tarefa"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -89,7 +89,7 @@ export const ACOES_QUADRO = [
   {
     id: "quadro.responder",
     titulo: "Responder a pergunta de uma tarefa bloqueada",
-    schema: objeto({ tarefa: P.tarefa, resposta: P.resposta }, ["tarefa", "resposta"]),
+    schema: objeto({ tarefa: P.tarefa, resposta: P.resposta, avancar: P.avancar, pela_fala: P.pela_fala, mensagem_id: P.mensagem_id }, ["tarefa"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -197,7 +197,7 @@ export const ACOES_QUADRO = [
   {
     id: "quadro.terminei",
     titulo: "Terminar a etapa (a tarefa vai para a próxima coluna)",
-    schema: objeto({ tarefa: P.tarefa }, []),
+    schema: objeto({ tarefa: P.tarefa, pela_fala: P.pela_fala, mensagem_id: P.mensagem_id }, []),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,

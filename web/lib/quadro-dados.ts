@@ -146,7 +146,7 @@ export function tarefasPorStatus(q: Pick<QuadroDto, "tarefas"> & { colunas?: rea
 }
 
 /** A impressão digital do card: o que, se mudar, faz o card acender (a resposta do agente "mexeu nele"). */
-const digital = (t: TarefaDto): string => JSON.stringify([t.titulo, t.descricao, t.status, t.agenteId, t.prUrl, t.pergunta, t.resposta, t.execucao, t.mudadoEm]);
+const digital = (t: TarefaDto): string => JSON.stringify([t.titulo, t.descricao, t.status, t.agenteId, t.prUrl, t.pergunta, t.resposta, t.respostaMensagemId ?? null, t.execucao, t.mudadoEm]);
 
 /**
  * Os cards que mudaram entre duas leituras do quadro (os novos inclusive). Sem leitura anterior, nenhum: abrir o quadro

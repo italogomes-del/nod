@@ -334,12 +334,26 @@ export function quadroComErro(): Html {
 
 /* ---------- A tarefa aberta ---------- */
 
+/**
+ * ADA-15 (ADR-154): a resposta que veio da fala da pessoa no chat diz por qual bot veio e leva à mensagem. O texto
+ * fica com o Gil (S4 do plano); o desenho é o do design system atual (qd-t-linhas, qd-link).
+ */
+export function origemDaResposta(t: Pick<TarefaDto, "respostaAgenteId" | "respostaAgenteNome" | "respostaConversaId" | "respostaMensagemId">): string {
+  if (!t.respostaAgenteId) return "";
+  const bot = t.respostaAgenteNome ? ` com ${esc(t.respostaAgenteNome)}` : "";
+  const ver = t.respostaConversaId && t.respostaMensagemId
+    ? ` · <button type="button" class="qd-link" data-act="ver-fala-da-resposta" data-agente="${esc(t.respostaAgenteId)}" data-conversa="${esc(t.respostaConversaId)}" data-mensagem="${esc(t.respostaMensagemId)}">ver mensagem</button>` : "";
+  return `<p class="qd-t-linhas qd-t-resposta-origem">Respondido no chat${bot}${ver}</p>`;
+}
+
 export function formResposta(t: TarefaDto): string {
   const id = `qd-resp-${esc(t.id)}`;
   return `<form class="qd-resp-form" data-form="responder-tarefa" data-id="${esc(t.id)}"><label class="qd-sr" for="${id}">Sua resposta</label>` +
     `<textarea id="${id}" class="qd-resp-in" name="resposta" rows="2" maxlength="${LIMITE_RESPOSTA}" required placeholder="Sua resposta"></textarea>` +
     // ADA-6: o Responder é leve (sem fundo cheio), como o Enviar do comentário: a tarefa parece conversa, não alerta.
-    `<button type="submit" class="qd-bt qd-bt-leve">Responder</button></form>`;
+    `<button type="submit" class="qd-bt qd-bt-leve">Responder</button>` +
+    // ADA-15: o mesmo passo que o chat faz com avancar (o "aprovado, pode seguir"). Texto provisório: fica com o Gil.
+    `<button type="submit" class="qd-bt qd-bt-leve" name="avancar" value="1">Responder e seguir</button></form>`;
 }
 
 /**
@@ -402,7 +416,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const secComentarios = comentarios.length
     ? `<h2 class="qd-t-sec">Comentários</h2><ol class="qd-hist">${comentarios.map((c) => `<li><span class="qd-hist-quem">${esc(c.assinatura)}</span> <span class="qd-hist-oque">${esc(c.texto)}</span></li>`).join("")}</ol>` : "";
   const porQuem = t.pedidoPorNome ? `<span class="qd-chip qd-chip-vazio">por ${esc(t.pedidoPorNome)}</span>` : "";
-  const resposta = t.resposta ? `<h2 class="qd-t-sec">Sua resposta</h2><p class="qd-t-resposta">${esc(t.resposta)}</p>` : "";
+  const resposta = t.resposta ? `<h2 class="qd-t-sec">Sua resposta</h2><p class="qd-t-resposta">${esc(t.resposta)}</p>${origemDaResposta(t)}` : "";
   // NOD-421: os PRs que o laço ligou (repo #N · estado); sem nenhum, o pr_url que o agente gravou, como antes.
   const prs = (t.prs ?? []).flatMap((p) => { const u = linkSeguro(p.url); return u ? [{ ...p, url: u }] : []; });
   const itensPr = prs.length

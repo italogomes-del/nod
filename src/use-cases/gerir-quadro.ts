@@ -3,6 +3,7 @@ import type { QuadroDto, ResultadoGerirQuadro } from "../contracts/quadro.ts";
 import { LIMITE_ACIONAMENTOS_HORA } from "../domain/freios-quadro.ts";
 import type { LinkDeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ehOpDeTrabalho, lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
+import { ERROS_FALA } from "../domain/fala-da-pessoa.ts";
 import { proporColunas } from "./colunas-do-quadro.ts";
 import type { IssueLinear } from "../contracts/quadro-importacao.ts";
 import { type BuscaDaPrevia, conferirImportacaoDoBot, type FalhaDaImportacao, proporImportacaoLinear } from "./importar-linear.ts";
@@ -174,8 +175,14 @@ export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, 
   if ("erro" in ops) return recusa("entrada_invalida", ops.indice >= 0 ? `ação ${ops.indice + 1}: ${ops.erro}` : ops.erro);
   // Quem responde ao bloqueio é a pessoa (revisão do PR #612). O bot só repassa o que ela disse a ele agora, na
   // conversa: turno dela (conversa ou ligação), de primeira mão e confiável — nunca uma tarefa, rotina ou colega.
-  if (ops.some((o) => o.tipo === "responder") && !(naConversa(turno) && limpo)) {
-    return recusa("entrada_invalida", "responder é a resposta da pessoa: só num turno em que ela falou com você e nada de fora entrou (não numa tarefa, rotina, pedido de colega ou depois de ler uma página). Peça a ela no card (status voce com a pergunta)");
+  // ADA-15 (ADR-154): com `pela_fala`, a autorização fica presa à fala da pessoa (a mensagem dela neste turno), não ao
+  // turno limpo: ler o quadro ou o Linear não a anula. Só o bot da própria dona, no turno dela, de primeira mão.
+  const comFala = ops.some((o) => "pela_fala" in o && o.pela_fala === true);
+  if (comFala && (!naConversa(turno) || deOutroDono)) return recusa("nao_permitido", ERROS_FALA.semFala);
+  if (ops.some((o) => o.tipo === "responder" && !o.pela_fala) && !(naConversa(turno) && limpo)) {
+    return recusa("entrada_invalida", naConversa(turno)
+      ? "responder é a resposta da pessoa: sem pela_fala, só num turno limpo, e este leu algo de fora (o quadro, o Linear, uma página). Se a pessoa respondeu nesta conversa citando a tarefa, mande o mesmo passo com pela_fala: true; senão, pergunte a ela citando o código da tarefa"
+      : "responder é a resposta da pessoa: só num turno em que ela falou com você (não numa tarefa, rotina ou pedido de colega). Peça a ela no card (status voce com a pergunta)");
   }
   // As colunas são da pessoa (ADR-140): o bot só mexe nelas a pedido dela, na conversa — não no turno de uma tarefa,
   // rotina ou pedido de colega (revisão do PR #615, o mesmo corte do Desfazer de lote alheio).
@@ -297,6 +304,8 @@ export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, 
     ...(procuracao ? { pedidoPor: procuracao, porProcuracao: true } : {}),
     // NOD-430: controle total só a pedido da pessoa, na conversa e num turno limpo; senão o limite normal.
     limite: naConversa(turno) && limpo ? "total" : "normal",
+    // ADA-15: as falas da pessoa neste turno (a que o abriu e as que entraram nele), já filtradas no repositório.
+    ...(comFala ? { falas: await deps.repos.mensagens.falasDaPessoaNoTurno(turno.id, turno.conversaId) } : {}),
   };
   // NOD-417: comentar numa tarefa do próprio quadro não é lote — grava o comentário e aciona o responsável e os @mencionados
   // (nunca o autor). A escolha entre ele e o comentário de quem participa (NOD-443, D7) é do aplicarLoteQuadro.
@@ -337,6 +346,8 @@ export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, 
   if (parado) partes.push(`A tarefa está em ${parado.coluna}, fora do andamento: o comentário ficou nela e ${parado.agenteNome} (o responsável) não foi acionado.`);
   if (r.data.seguradas && r.data.comentario) partes.push("A corrente de bots chegou ao limite: o comentário ficou gravado e ninguém foi acionado.");
   else if (r.data.seguradas) partes.push(`${r.data.seguradas === 1 ? "Uma tarefa ficou" : `${r.data.seguradas} tarefas ficaram`} na espera sem começar: a corrente de bots chegou ao limite ou o lote passou de ${MAX_COMECOS_POR_LOTE} começos. Diga à pessoa: ela começa a tarefa pela conversa com você (mudar_tarefa com status afazer, num turno dela).`);
+  // ADA-15: o card guarda a fala literal da pessoa, com o link da mensagem; o texto do bot não entra.
+  if (comFala && lote) partes.push("A resposta no card é a fala literal da pessoa, com o link para a mensagem; o histórico guarda de qual fala veio.");
   if (r.data.ajustada) partes.push("Um passo de coluna foi para a posição válida mais próxima: as colunas só mudam de lugar dentro do próprio grupo.");
   if (quadro?.cumpridoEm) partes.push(`Meta cumprida: ${quadro.resumo ?? ""}`.trim());
   if (lote && !desfeito) partes.push(`A pessoa vê um Desfazer; para desfazer você mesmo: {tipo: "desfazer", lote: "${lote.id}"}.`);

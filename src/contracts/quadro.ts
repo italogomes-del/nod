@@ -69,7 +69,7 @@ export type TarefaQuadro = {
   numero: number | null;
   /** NOD-443 (ADR-143): quem pediu (a dona ou quem participa). Null antes da 0146 ou num turno do próprio quadro; ausente na foto de um lote de antes. */
   pedidoPor?: string | null;
-};
+} & ProvenienciaResposta; // ADA-15 (ADR-154): de qual fala da pessoa veio a resposta
 
 export { MODOS_CONVERSA, MODOS_ESCOLHIVEIS, type ModoConversa } from "./quadro-pessoas.ts";
 
@@ -117,7 +117,7 @@ export type LoteQuadro = {
 /** NOD-443 (ADR-143): as pessoas, quem decide, o mural e os comentários moram em quadro-pessoas.ts. */
 export type { MembroQuadroDto, QuemDecideDto, LinhaMuralDto, ComentarioQuadroDto, AutorComentario, ComentarioTarefa, ComentarioDto, QuadroCompartilhadoDto } from "./quadro-pessoas.ts";
 import type { ComentarioQuadroDto, MembroQuadroDto, ModoConversa, QuemDecideDto } from "./quadro-pessoas.ts";
-import type { ItemLinear } from "./quadro-bot.ts";
+import type { ItemLinear, PelaFala, ProvenienciaResposta } from "./quadro-bot.ts";
 
 /** O que a web e o bot recebem: o quadro com as tarefas, a execução de cada uma e o último lote que dá para desfazer. */
 export type TarefaDto = TarefaQuadro & {
@@ -137,6 +137,7 @@ export type TarefaDto = TarefaQuadro & {
   prs?: PrNaTela[];
   linhas?: LinhaDeSistema[];
   movimentos?: MovimentoDto[]; // NOD-419: os últimos movimentos (o mais novo primeiro)
+  respostaAgenteNome?: string | null; // ADA-15: o bot com quem a pessoa falava (null = respondida no card)
 };
 export type QuadroDto = Omit<Quadro, "colunas"> & {
   agenteNome: string;
@@ -163,8 +164,8 @@ export type OpQuadro =
   | { tipo: "importar_linear"; itens: ItemLinear[] }
   | OpImportarTimeLinear
   | OpAssumirQuadro
-  | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; /** NOD-419: o porquê de bloquear ou cancelar (o agente precisa dizer). */ motivo?: string }
-  | { tipo: "responder"; tarefa: string; resposta: string }
+  | ({ tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; /** NOD-419: o porquê de bloquear ou cancelar (o agente precisa dizer). */ motivo?: string } & PelaFala)
+  | ({ tipo: "responder"; tarefa: string; resposta: string; /** ADA-15: responder e seguir (o "aprovado"). */ avancar?: true } & PelaFala)
   /** NOD-418: o trabalho da tarefa (sozinhos, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */
   | { tipo: "repetir_trabalho"; tarefa: string } | { tipo: "cancelar_trabalho"; tarefa: string } | { tipo: "recado"; tarefa: string; texto: string }
   | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null }
@@ -179,7 +180,7 @@ export type OpQuadro =
   | { tipo: "mover_coluna"; coluna: string; antes_de?: string; depois_de?: string }
   | { tipo: "remover_coluna"; coluna: string; destino?: string }
   | { tipo: "definir_passagem"; coluna: string; agente?: string | null; instrucoes?: string | null }
-  | { tipo: "terminei"; tarefa?: string } | OpFreio // NOD-419: nao_e_comigo, desfazer_movimento, travar_coluna
+  | ({ tipo: "terminei"; tarefa?: string } & PelaFala) | OpFreio // NOD-419: nao_e_comigo, desfazer_movimento, travar_coluna
   | { tipo: "substituir_colunas"; colunas: { id?: string; nome: string; grupo: GrupoColuna }[]; destinos?: { de: string; para: string }[] }
   /* NOD-443 (ADR-143): pessoas e modo (só a dona) e o comentário, sozinhos. Um só comentar: no próprio quadro, numa tarefa, aciona (NOD-417); de quem participa ou sem tarefa, fica para a dona (D7). */
   /** `modo`: o da conversa, escolhido junto com a primeira pessoa (D3), no mesmo lote (revisão 1, achado 11). */
@@ -189,7 +190,7 @@ export type OpQuadro =
   | { tipo: "comentar"; texto: string; tarefa?: string };
 export type TipoOpQuadro = OpQuadro["tipo"];
 /** A ferramenta gerir_quadro (quadro-bot.ts) e o quadro como o bot o lê (quadro-resumo-bot.ts) moram fora (o teto de linhas). */
-export type { ItemLinear, ArgsGerirQuadro, ResultadoGerirQuadro } from "./quadro-bot.ts";
+export type { ItemLinear, ArgsGerirQuadro, ResultadoGerirQuadro, PelaFala, ProvenienciaResposta } from "./quadro-bot.ts";
 export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
 export const LIMITES_QUADRO = { comentario: 4000, comentariosPorPessoa: 50, membros: 50, meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, motivo: 600, prazoMin: 30 * 24 * 60 } as const;

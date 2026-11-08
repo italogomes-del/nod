@@ -312,8 +312,9 @@ export function criarApi(escopo: Escopo) {
     desfazerAssumir: (agenteId: string) => del<ResultadoAssumir>(`agentes/${encodeURIComponent(agenteId)}/quadro/assumir`),
     /** NOD-422 (PR 2): a trilha do quadro (só ids). Fundo, como a telemetria das linhas: a falha some em silêncio. */
     trilhaQuadro: (eventos: readonly EventoTrilhaQuadro[]) => pedir<{ gravados: number }>("POST", `${base}/telemetria/quadro`, { eventos }, { keepalive: true, silencioso: true }),
-    responderTarefa: (agenteId: string, tarefaId: string, resposta: string) =>
-      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
+    /** ADA-15: `avancar` = "Responder e seguir" (responde e manda a tarefa para a próxima coluna). */
+    responderTarefa: (agenteId: string, tarefaId: string, resposta: string, avancar = false) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta, ...(avancar ? { avancar: true } : {}) }),
     /** NOD-417: os comentários da tarefa; o da pessoa aciona o responsável e @nome aciona outro bot. */
     comentariosDaTarefa: (agenteId: string, tarefaId: string) =>
       get<{ comentarios: ComentarioDto[]; atividade?: AtividadeTarefa[]; criadaPor?: string | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`),

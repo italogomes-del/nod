@@ -63,7 +63,7 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<RespostaMutacao>;
   /** ADA-4: o ■ Parar da pílula (o mesmo POST do chat). Sem isto, o botão fica sempre Enviar. */
   pararConversa?(conversaId: string): Promise<{ nadaRodando?: boolean }>;
-  responderTarefa(agenteId: string, tarefaId: string, resposta: string): Promise<MutacaoQuadro>;
+  responderTarefa(agenteId: string, tarefaId: string, resposta: string, avancar?: boolean): Promise<MutacaoQuadro>;
   desfazerLoteQuadro(agenteId: string, loteId: string): Promise<MutacaoQuadro>;
   /** NOD-415 (ADR-141): criar o quadro e mudar a meta e o prazo pela tela (meta null tira). */
   criarQuadro(agenteId: string, campos: { meta?: string | null; prazo?: string | null }): Promise<MutacaoQuadro>;
@@ -1744,23 +1744,23 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     setTimeout(tirar, 1400);
   }
 
-  async function responder(form: HTMLFormElement): Promise<void> {
+  async function responder(form: HTMLFormElement, avancar = false): Promise<void> {
     const a = dd?.api();
     const id = form.dataset["id"];
     const campo = form.querySelector<HTMLTextAreaElement>("textarea");
     const resposta = campo?.value.trim() ?? "";
     if (!a || !agenteId || !id || !campo || !resposta) return;
-    const botao = form.querySelector<HTMLButtonElement>('button[type="submit"]');
-    // Enquanto envia, nem o botão nem o Enter mandam de novo (NOD-420).
+    const botoes = [...form.querySelectorAll<HTMLButtonElement>('button[type="submit"]')];
+    // Enquanto envia, nem os botões nem o Enter mandam de novo (NOD-420).
     if (form.dataset["enviando"] === "1") return;
     form.dataset["enviando"] = "1";
-    if (botao) botao.disabled = true;
+    for (const b of botoes) b.disabled = true;
     campo.readOnly = true;
     // A pessoa pode trocar de bot antes da resposta voltar: o quadro de um não entra na tela do outro.
     const c = chave;
     const de = agenteId;
     try {
-      const r = await a.responderTarefa(de, id, resposta);
+      const r = await a.responderTarefa(de, id, resposta, avancar);
       // O rascunho do que foi respondido não volta quando a tarefa pedir de novo (revisões 1 e 6).
       if (c) limparRespostaEnviada(c, id, resposta);
       if (c !== chave || de !== agenteId) return;
@@ -1775,7 +1775,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       mudarFaixa({ tipo: "erro", texto: "Não consegui mandar a resposta. Ela continua no campo." });
     } finally {
       delete form.dataset["enviando"];
-      if (botao) botao.disabled = false;
+      for (const b of botoes) b.disabled = false;
       campo.readOnly = false;
     }
   }
@@ -2983,7 +2983,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (qual !== "conversa-no-quadro" && qual !== "responder-tarefa" && qual !== "criar-quadro" && qual !== "editar-meta") return;
     ev.preventDefault();
     if (qual === "conversa-no-quadro") enviarPedido(form);
-    else if (qual === "responder-tarefa") void responder(form);
+    // ADA-15: o "Responder e seguir" é o submitter com name=avancar; o Enter (sem submitter) só responde.
+    else if (qual === "responder-tarefa") void responder(form, (ev as SubmitEvent).submitter?.getAttribute("name") === "avancar");
     else if (qual === "criar-quadro") {
       const meta = form.querySelector<HTMLInputElement>('[name="meta"]')?.value.trim() ?? "";
       const prazo = prazoDoForm(form);

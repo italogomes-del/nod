@@ -1026,6 +1026,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async textosDaPessoa(conversaId, limite) {
         return doTenant(b.mensagens).filter((m) => m.conversaId === conversaId && m.autoria.autor_tipo === "pessoa" && m.autoria.autor_id === escopo.pessoaId && m.kind === "texto").sort((x, y) => y.criadoEm - x.criadoEm).slice(0, limite).map((m) => m.texto);
       },
+      async falasDaPessoaNoTurno(turnoId, conversaId) {
+        const ids = new Set(doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.mensagemOrigemId && (t.id === turnoId || t.absorvidoPor === turnoId)).map((t) => t.mensagemOrigemId));
+        return doTenant(b.mensagens)
+          .filter((m) => ids.has(m.id) && m.conversaId === conversaId && m.autoria.autor_tipo === "pessoa" && m.autoria.autor_id === escopo.pessoaId && m.autoria.sob_procuracao_de == null && m.confianca === "confiavel" && m.kind === "texto")
+          .sort((x, y) => x.criadoEm - y.criadoEm)
+          .map((m) => ({ id: m.id, conversaId: m.conversaId, texto: m.texto, criadoEm: m.criadoEm }));
+      },
       async listarComTurno(conversaId, limite = 200) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return comTurno(todas.slice(Math.max(0, todas.length - limite)));
@@ -3966,6 +3973,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       numeroAntigo: async () => null,
       moverTarefa: soNoPostgres,
       registrarHistorico: soNoPostgres,
+      // ADA-15 (revisão do PR #696): o histórico é do Postgres (tests/integration/quadro-aprovacao-pela-fala.test.ts).
+      falasUsadas: async () => [],
       historico: async () => [],
       buscarVarios: async () => [],
       apagarCodigosEHistorico: soNoPostgres,

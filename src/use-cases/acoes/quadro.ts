@@ -134,7 +134,7 @@ export const EXECUTORES_QUADRO = {
   "quadro.importar_time_linear": importarTimeLinear,
   "quadro.assumir": assumirQuadro,
   "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; motivo?: string }>("mudar_tarefa"),
-  "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
+  "quadro.responder": umaAcao<{ tarefa: string; resposta: string; avancar?: boolean }>("responder"),
   "quadro.comentar": umaAcao<{ texto: string; tarefa?: string }>("comentar"),
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
   "quadro.mover_tarefa": umaAcao<{ tarefa: string; quadro: string }>("mover_quadro"),

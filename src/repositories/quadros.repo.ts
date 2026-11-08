@@ -41,6 +41,9 @@ interface LinhaTarefa {
   terminada_em: Date | null;
   numero: number | null;
   pedido_por: string | null;
+  resposta_mensagem_id: string | null;
+  resposta_conversa_id: string | null;
+  resposta_agente_id: string | null;
 }
 
 interface LinhaLote {
@@ -71,7 +74,7 @@ export type FotoLote = {
 };
 
 const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde, prefixo, modo_conversa";
-const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por";
+const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por, resposta_mensagem_id, resposta_conversa_id, resposta_agente_id";
 interface LinhaMovimento {
   id: string;
   tarefa_id: string;
@@ -153,6 +156,9 @@ const paraTarefa = (l: LinhaTarefa): TarefaQuadro => ({
   terminadaEm: l.terminada_em ? ms(l.terminada_em) : null,
   numero: l.numero ?? null,
   pedidoPor: l.pedido_por ?? null,
+  respostaMensagemId: l.resposta_mensagem_id ?? null,
+  respostaConversaId: l.resposta_conversa_id ?? null,
+  respostaAgenteId: l.resposta_agente_id ?? null,
 });
 
 const paraLote = (l: LinhaLote): LoteQuadro & { antes: FotoLote } => ({
@@ -171,7 +177,7 @@ const paraLote = (l: LinhaLote): LoteQuadro & { antes: FotoLote } => ({
 export type NovaTarefa = Pick<TarefaQuadro, "quadroId" | "titulo" | "descricao" | "status" | "agenteId"> & Partial<Pick<TarefaQuadro, "voltarPara" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "terminadaEm" | "numero" | "pedidoPor">>;
 
 /** O que muda numa tarefa (tudo menos ids e datas de criação). */
-export type CamposTarefa = Pick<TarefaQuadro, "titulo" | "descricao" | "status" | "voltarPara" | "agenteId" | "ordem" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "turnoId" | "terminadaEm"> & Partial<Pick<TarefaQuadro, "pedidoPor">>;
+export type CamposTarefa = Pick<TarefaQuadro, "titulo" | "descricao" | "status" | "voltarPara" | "agenteId" | "ordem" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "turnoId" | "terminadaEm"> & Partial<Pick<TarefaQuadro, "pedidoPor" | "respostaMensagemId" | "respostaConversaId" | "respostaAgenteId">>;
 
 /**
  * definido em 2026-10-31 (NOD-442): o quadro-agente, as tarefas e os lotes. Só primitivas: quem aplica um lote (e trava
@@ -340,10 +346,20 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       return paraTarefa(l!);
     },
     async salvarTarefa(id: string, c: CamposTarefa): Promise<TarefaQuadro | null> {
+      // ADA-15: a proveniência da resposta acompanha a resposta. Os chamadores salvam a tarefa inteira (`{ ...t }`), com a
+      // proveniência lida antes: com a resposta igual, fica a que veio (ou a de antes, se ausente); com a resposta mudada,
+      // só vale uma proveniência nova (a do responder pela fala); a velha some, porque a resposta nova não veio daquela fala.
+      const proveniencia = (coluna: string, v: string | null | undefined) => {
+        const col = conn.unsafe(coluna);
+        const novo = v === undefined ? conn`${col}` : conn`${v}::uuid`;
+        return conn`case when resposta is not distinct from ${c.resposta}::text then ${novo} when ${novo} is distinct from ${col} then ${novo} else null end`;
+      };
       const [l] = await conn<LinhaTarefa[]>`
         update quadro_tarefas set titulo = ${c.titulo}, descricao = ${c.descricao}, status = ${c.status}, voltar_para = ${c.voltarPara ?? null}, agente_id = ${c.agenteId},
           ordem = ${c.ordem}, linear_id = ${c.linearId}, linear_url = ${c.linearUrl}, pr_url = ${c.prUrl}, pergunta = ${c.pergunta},
-          resposta = ${c.resposta}, de_fora = ${c.deFora}, turno_id = ${c.turnoId}, mudado_em = clock_timestamp(),
+          resposta = ${c.resposta}, de_fora = ${c.deFora},
+          resposta_mensagem_id = ${proveniencia("resposta_mensagem_id", c.respostaMensagemId)}, resposta_conversa_id = ${proveniencia("resposta_conversa_id", c.respostaConversaId)},
+          resposta_agente_id = ${proveniencia("resposta_agente_id", c.respostaAgenteId)}, turno_id = ${c.turnoId}, mudado_em = clock_timestamp(),
           terminada_em = ${c.terminadaEm === null ? null : new Date(c.terminadaEm)},
           pedido_por = coalesce(${c.pedidoPor ?? null}::uuid, pedido_por)
         where ${dona()} and id = ${id}
@@ -362,13 +378,15 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     async restaurarTarefa(t: TarefaQuadro, o: { manterMudadoEm?: boolean } = {}): Promise<TarefaQuadro> {
       const mudado = o.manterMudadoEm ? conn`${new Date(t.mudadoEm)}::timestamptz` : conn`clock_timestamp()`;
       const [l] = await conn<LinhaTarefa[]>`
-        insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por)
+        insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por, resposta_mensagem_id, resposta_conversa_id, resposta_agente_id)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${t.id}, ${t.quadroId}, ${t.titulo}, ${t.descricao}, ${t.status}, ${t.voltarPara ?? null}, ${t.agenteId}, ${t.ordem},
-          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, ${mudado}, ${terminadaDaFoto(t)}, ${t.numero ?? null}, ${t.pedidoPor ?? null})
+          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, ${mudado}, ${terminadaDaFoto(t)}, ${t.numero ?? null}, ${t.pedidoPor ?? null},
+          ${t.respostaMensagemId ?? null}, ${t.respostaConversaId ?? null}, ${t.respostaAgenteId ?? null})
         on conflict (tenant_id, id) do update set titulo = excluded.titulo, descricao = excluded.descricao, status = excluded.status, voltar_para = excluded.voltar_para,
           agente_id = excluded.agente_id, ordem = excluded.ordem, linear_id = excluded.linear_id, linear_url = excluded.linear_url,
           pr_url = excluded.pr_url, pergunta = excluded.pergunta, resposta = excluded.resposta, de_fora = excluded.de_fora, turno_id = excluded.turno_id, mudado_em = excluded.mudado_em, terminada_em = excluded.terminada_em,
-          numero = coalesce(quadro_tarefas.numero, excluded.numero), pedido_por = excluded.pedido_por
+          numero = coalesce(quadro_tarefas.numero, excluded.numero), pedido_por = excluded.pedido_por,
+          resposta_mensagem_id = excluded.resposta_mensagem_id, resposta_conversa_id = excluded.resposta_conversa_id, resposta_agente_id = excluded.resposta_agente_id
         returning ${conn.unsafe(COLUNAS_T)}`;
       return paraTarefa(l!);
     },
@@ -684,14 +702,26 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       if (ms_.length === 0) return;
       const autorAgente = (m: MudancaTarefa) => (m.autor.tipo === "agente" ? m.autor.agenteId : null);
       await conn`
-        insert into quadro_tarefa_historico (tenant_id, owner_id, tarefa_id, quadro_id, campo, de, para, autor, autor_agente_id, lote_id, criado_em)
-        select ${escopo.tenantId}, ${escopo.pessoaId}, h.tarefa_id, ${quadroId}, h.campo, x.de, x.para, h.autor, x.autor_agente_id, ${loteId},
+        insert into quadro_tarefa_historico (tenant_id, owner_id, tarefa_id, quadro_id, campo, de, para, autor, autor_agente_id, lote_id, mensagem_id, criado_em)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, h.tarefa_id, ${quadroId}, h.campo, x.de, x.para, h.autor, x.autor_agente_id, ${loteId}, x.mensagem_id,
                clock_timestamp() + (h.ord * interval '1 microsecond')
           from unnest(${conn.array(ms_.map((m) => m.tarefaId))}::uuid[], ${conn.array(ms_.map((m) => m.campo))}::text[],
                       ${conn.array(ms_.map((m) => m.de ?? ""))}::text[], ${conn.array(ms_.map((m) => m.para ?? ""))}::text[],
-                      ${conn.array(ms_.map((m) => m.autor.tipo))}::text[], ${conn.array(ms_.map((m) => autorAgente(m) ?? ""))}::text[])
-            with ordinality as h(tarefa_id, campo, de_, para_, autor, autor_agente_, ord)
-          cross join lateral (select nullif(h.de_, '') as de, nullif(h.para_, '') as para, nullif(h.autor_agente_, '')::uuid as autor_agente_id) x`;
+                      ${conn.array(ms_.map((m) => m.autor.tipo))}::text[], ${conn.array(ms_.map((m) => autorAgente(m) ?? ""))}::text[],
+                      ${conn.array(ms_.map((m) => m.mensagemId ?? ""))}::text[])
+            with ordinality as h(tarefa_id, campo, de_, para_, autor, autor_agente_, mensagem_, ord)
+          cross join lateral (select nullif(h.de_, '') as de, nullif(h.para_, '') as para, nullif(h.autor_agente_, '')::uuid as autor_agente_id, nullif(h.mensagem_, '')::uuid as mensagem_id) x`;
+    },
+    /**
+     * ADA-15, revisão do PR #696: das falas do turno, as que já autorizaram um passo `pela_fala` em cada tarefa (o
+     * `mensagem_id` do histórico). Uma fala vale um passo por tarefa.
+     */
+    async falasUsadas(tarefaIds: readonly string[], mensagemIds: readonly string[]): Promise<{ tarefaId: string; mensagemId: string }[]> {
+      if (tarefaIds.length === 0 || mensagemIds.length === 0) return [];
+      const ls = await conn<{ tarefa_id: string; mensagem_id: string }[]>`
+        select distinct tarefa_id, mensagem_id from quadro_tarefa_historico
+        where ${dona()} and tarefa_id = any(${conn.array([...tarefaIds])}::uuid[]) and mensagem_id = any(${conn.array([...mensagemIds])}::uuid[])`;
+      return ls.map((l) => ({ tarefaId: l.tarefa_id, mensagemId: l.mensagem_id }));
     },
     /** O histórico da tarefa, mais antigo primeiro (até 200 linhas, as mais recentes). */
     /** `quadroId` = o quadro em que a mudança foi registrada (no mover, o destino; a origem vai em `de` da linha `quadro`). */

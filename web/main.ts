@@ -5922,6 +5922,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     quadroNaTela.abrirTarefaDe(agenteId, tarefaId);
     navegar({ tipo: "conversa", conversaId: dono.conversaId, agenteId });
   },
+  // ADA-15: o "ver mensagem" da resposta que veio pelo chat abre a conversa com o bot e leva à fala da pessoa.
+  "ver-fala-da-resposta": (el) => {
+    const { agente = "", conversa = "", mensagem = "" } = el.dataset;
+    if (!agente || !conversa || !mensagem) return;
+    abrirMensagemAchada({ id: mensagem, conversaId: conversa, conversaTipo: "propria", agenteId: agente, salaId: null, autor: { tipo: "pessoa", id: "" }, em: "", trecho: "" });
+  },
   // NOD-455: a linha de "Compartilhados com você" e o "Abrir no quadro" do aviso.
   "abrir-quadro-compartilhado": (el) => {
     const qid = el.dataset.quadro ?? "";
