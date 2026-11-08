@@ -8,6 +8,8 @@ import { dialogo } from "./gestao-agentes.ts";
 import { TEXTO_CONSENTIMENTO, VERSAO_CONSENTIMENTO } from "./ligacao.ts";
 import { criarTesteDeIas } from "./onboarding-teste.ts";
 import type { UiIas } from "./cartao-ia.ts";
+import { criarEsteComputador } from "./este-computador.ts";
+import { htmlConversaTexto, LINHA_PULOU, SO_OLHAR, type PassoTexto } from "./conversa-texto.ts";
 import { destinoAoFimDoOla, htmlCamada, htmlGuia, notaForaDoApp, ORDEM_IAS, textoComoLiberar, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
 
 /**
@@ -53,6 +55,13 @@ export type DepsOnboarding = {
   aoMudar: () => void;
   /** As IAs do app do Mac (web/telas/cartao-ia.ts): com a ponte `ias`, a etapa da IA usa o cartão de Provedores de IA. */
   iasMac?: () => UiIas;
+  /**
+   * ADA-242 (NOD_ONBOARDING_TEXTO, jornada A): sem ligação. Depois do "olá", a tela "Este computador" (só no app, uma vez
+   * por máquina) e a conversa por texto com duas perguntas. Desligada, tudo segue como antes.
+   */
+  texto?: () => boolean;
+  /** O nome sugerido na primeira pergunta (tirado do e-mail da conta). */
+  nomeSugerido?: () => string | null;
 };
 
 export type TelaOnboarding = ReturnType<typeof criarTelaOnboarding>;
@@ -89,6 +98,17 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
   let acabouDeConcluir = false;
   let releitura: number | null = null;
   let avancando = false;
+  // ADA-242: a jornada A (texto).
+  const jornadaA = (): boolean => deps.texto?.() === true;
+  let naTelaComputador = false;
+  /** Aceite 6: a pessoa já passou pelo onboarding, mas esta máquina não viu "Este computador" (só essa tela, sem conversa). */
+  let soComputador = false;
+  let maquinaVerificada = false;
+  let passoTexto: PassoTexto = { passo: "apelido" };
+  let textoOcupado = false;
+  let textoErro: string | null = null;
+  /** A pessoa pulou as perguntas (ou só quer olhar): a linha fica na conversa do Nod. */
+  let pulouEm: string | null = null;
 
   const api = (): Api => {
     const a = deps.api();
@@ -117,6 +137,15 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     ficarNaEtapaDaIa: async () => { if (deps.dados()?.etapa !== "executor") await mudarEtapa("executor").catch(() => undefined); },
   });
 
+  const computador = criarEsteComputador({
+    ponte: () => window.nodDesktop,
+    estadosMac: () => deps.iasMac?.().estados ?? {},
+    inventario: () => deps.dados()?.executor.ias ?? [],
+    reler: () => reler(),
+    agora: () => Date.now(),
+    aoMudar: () => deps.aoMudar(),
+  });
+
   function hidratar(o: EstadoOnboarding): void {
     deps.hidratar(o);
     deps.aoMudar();
@@ -125,9 +154,11 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
   /** A fase que a tela mostra, das etapas do servidor e do que é local (o "olá", a ligação aberta aqui). */
   function fase(d: EstadoOnboarding): FaseTela | null {
     if (!deps.aberto()) return null;
+    if (soComputador) return "computador";
     if (d.etapa === "concluido") return acabouDeConcluir ? "fim" : null;
     // O servidor tirou o onboarding da frente (a guia foi excluída no meio): a camada fecha na próxima leitura.
     if (!d.mostrar) return null;
+    if (jornadaA() && (d.etapa === null || d.etapa === "ola" || d.etapa === "executor" || d.etapa === "chamando")) return naTelaComputador ? "computador" : "ola";
     if (!olaPassou && (d.etapa === null || d.etapa === "ola" || d.etapa === "executor")) return "ola";
     // Com teste, o "pronto" do servidor é só o login: a ligação espera uma IA que respondeu e a pessoa ter seguido.
     if (d.etapa === null || d.etapa === "ola" || d.etapa === "executor") return (teste.ativo() ? teste.podeLigar(d) : d.executor.pronto) ? "chamando" : "executor";
@@ -162,16 +193,17 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     if (!e) return "";
     agendarPelaFase(e);
     // Sem guia, a configuração é uma camada por cima do app: precisa de uma saída.
+    if (e.fase === "computador") return computador.html();
     if (e.fase === "configurando" && !e.dados.guia) return `<div class="ob-guia-solta">${htmlGuia(e)}<button type="button" class="ob-link ob-depois" data-act="onboarding-depois">Fazer depois</button></div>`;
     return htmlCamada(e, deps.ligacao.cheia());
   }
 
   /** Os efeitos de cada fase (timer do olá, sonda do Mac, conclusão) — idempotentes, chamados a cada desenho. */
   function agendarPelaFase(e: EstadoTelaOnboarding): void {
-    if (e.fase === "ola") teste.iniciar(e.dados);
+    if (e.fase === "ola" && !jornadaA()) teste.iniciar(e.dados);
     if (e.fase === "ola" && timerOla === null) timerOla = window.setTimeout(() => { timerOla = null; void passarOla(); }, OLA_MS);
-    if (e.fase === "executor" && sonda === null) sonda = window.setInterval(() => void sondar(), SONDA_MS);
-    if (e.fase !== "executor" && sonda !== null) { window.clearInterval(sonda); sonda = null; }
+    if ((e.fase === "executor" || e.fase === "computador") && sonda === null) sonda = window.setInterval(() => void (e.fase === "computador" ? sondarComputador() : sondar()), SONDA_MS);
+    if (e.fase !== "executor" && e.fase !== "computador" && sonda !== null) { window.clearInterval(sonda); sonda = null; }
     if (e.fase === "fim" && e.dados.etapa !== "concluido" && !e.emLigacao) void concluir();
   }
 
@@ -181,6 +213,11 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     if (timerOla !== null) { window.clearTimeout(timerOla); timerOla = null; }
     const d = deps.dados();
     if (!d) return;
+    if (jornadaA()) {
+      if (await computador.decidir()) { naTelaComputador = true; deps.aoMudar(); }
+      else await irParaTexto();
+      return;
+    }
     teste.iniciar(d);
     const destino = destinoAoFimDoOla(teste.naTela());
     if (destino === "como_antes") { await seguirPeloLogin(d, true); return; }
@@ -310,6 +347,79 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     }
   }
 
+  /** ADA-242: a sonda da tela "Este computador" (o 2f por prazo; no Windows, relê o inventário enquanto espera o login). */
+  async function sondarComputador(): Promise<void> {
+    await computador.sondar();
+    deps.aoMudar();
+  }
+
+  /** ADA-242: sai do "olá" (ou de "Este computador") para a conversa por texto com o Nod, sem ligação. */
+  async function irParaTexto(): Promise<void> {
+    const deComputador = naTelaComputador;
+    naTelaComputador = false;
+    passoTexto = { passo: "apelido" };
+    try {
+      await semVoz();
+    } catch (e) {
+      // A etapa não mudou: volta para a tela de onde saiu, com o botão valendo de novo (senão o "olá" fica preso).
+      if (deComputador) naTelaComputador = true;
+      else olaPassou = false;
+      deps.erro(e);
+    }
+    deps.aoMudar();
+  }
+
+  /** Continuar/Pular em "Este computador": grava o "já vi"; na máquina nova de quem já concluiu, só fecha a camada. */
+  async function sairDoComputador(): Promise<void> {
+    await computador.passar();
+    if (!soComputador) { await irParaTexto(); return; }
+    soComputador = false;
+    deps.abrir(false);
+    deps.aoMudar();
+  }
+
+  /**
+   * Aceite 6 (reinstalação limpa, mesmo e-mail): a etapa é da pessoa e já acabou, mas o "já vi" é desta máquina. Uma vez
+   * por sessão, com a leitura do onboarding feita e a camada fechada, abre só "Este computador".
+   */
+  async function verificarMaquina(): Promise<void> {
+    if (maquinaVerificada || !jornadaA() || deps.aberto()) return;
+    const d = deps.dados();
+    if (!d || d.mostrar) return;
+    maquinaVerificada = true;
+    if (!(await computador.decidir()) || deps.aberto()) return;
+    soComputador = true;
+    deps.abrir(true);
+    deps.aoMudar();
+  }
+
+  /** ADA-242: as duas respostas vão com a etapa 'configurando' (a mesma ação `onboarding.etapa`). */
+  async function enviarRespostas(apelido: string | null, objetivo: string | null): Promise<void> {
+    if (textoOcupado) return;
+    textoOcupado = true;
+    textoErro = null;
+    deps.aoMudar();
+    try {
+      const respostas = { ...(apelido ? { apelido } : {}), ...(objetivo && objetivo !== SO_OLHAR ? { objetivo } : {}) };
+      hidratar(await api().etapaOnboarding({ etapa: "configurando", semVoz: true, respostas }));
+      passoTexto = { passo: "enviando", apelido, objetivo };
+      if (objetivo === SO_OLHAR) await pularPerguntas();
+      else deps.invalidar();
+    } catch (e) {
+      textoErro = "Não consegui guardar agora. Tente de novo.";
+      deps.erro(e);
+    } finally {
+      textoOcupado = false;
+      deps.aoMudar();
+    }
+  }
+
+  /** "Pular as perguntas" (ou "Só quero olhar"): conclui sem bot e deixa uma linha na conversa do Nod. */
+  async function pularPerguntas(): Promise<void> {
+    pulouEm = deps.dados()?.guia?.conversaId ?? null;
+    await fazerDepois();
+  }
+
   async function concluir(): Promise<void> {
     if (concluindo) return;
     concluindo = true;
@@ -407,6 +517,17 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     "onboarding-escolher-rotina": (el) => agir((a) => a.rotinaDoOnboarding(Number(el.dataset.indice ?? "0"))),
     "onboarding-criar-rotina-proposta": (el) => agir((a) => a.decidir(el.dataset.id ?? "", {})),
     "onboarding-de-novo": () => deNovo(),
+    // ADA-242: a tela "Este computador" e a conversa por texto (só com NOD_ONBOARDING_TEXTO).
+    "computador-instalar": (el) => computador.acoes["computador-instalar"](iaDoClique(el)),
+    "computador-entrar": (el) => computador.acoes["computador-entrar"](iaDoClique(el)),
+    "computador-abrir": (el) => computador.acoes["computador-abrir"](iaDoClique(el)),
+    "computador-conferir": (el) => computador.acoes["computador-conferir"](iaDoClique(el)),
+    "computador-cancelar": (el) => computador.acoes["computador-cancelar"](iaDoClique(el)),
+    "computador-continuar": () => sairDoComputador(),
+    "computador-pular": () => sairDoComputador(),
+    "texto-apelido-sim": () => { passoTexto = { passo: "objetivo", apelido: deps.nomeSugerido?.() ?? null }; deps.aoMudar(); },
+    "texto-objetivo": (el) => enviarRespostas(passoTexto.passo === "apelido" ? null : passoTexto.apelido, el.dataset.valor ?? null),
+    "texto-pular": () => pularPerguntas(),
   };
 
   const forms: Record<string, (form: HTMLFormElement) => Promise<void> | void> = {
@@ -417,6 +538,18 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       if (!nome) return;
       const decisao = form.dataset.decisaoBot;
       return agir((a) => (decisao ? a.decidirBot(decisao, { nome, descricao }) : a.botDoOnboarding(nome, descricao)));
+    },
+    "computador-codigo": (form) => computador.colarCodigo(form.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", String(new FormData(form).get("codigo") ?? "")),
+    "texto-apelido": (form) => {
+      const apelido = String(new FormData(form).get("apelido") ?? "").trim();
+      if (!apelido) return;
+      passoTexto = { passo: "objetivo", apelido };
+      deps.aoMudar();
+    },
+    "texto-objetivo": (form) => {
+      const objetivo = String(new FormData(form).get("objetivo") ?? "").trim();
+      if (!objetivo) return;
+      return enviarRespostas(passoTexto.passo === "apelido" ? null : passoTexto.apelido, objetivo);
     },
   };
 
@@ -442,6 +575,10 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       acabouDeConcluir = false;
       notaIa = null;
       iaEntrando = null;
+      naTelaComputador = false;
+      soComputador = false;
+      passoTexto = { passo: "apelido" };
+      pulouEm = null;
       teste.recomecar();
       hidratar(await api().etapaOnboarding({ etapa: "ola" }));
       deps.abrir(true);
@@ -456,17 +593,23 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     /** A camada cobre o app (olá, IA, "está te ligando"): o main deixa a `.app` inerte. */
     cobre: (): boolean => {
       const e = estadoTela();
-      return !!e && (e.fase === "ola" || e.fase === "executor" || e.fase === "chamando");
+      return !!e && (e.fase === "ola" || e.fase === "computador" || e.fase === "executor" || e.fase === "chamando");
     },
     /** O bloco dos cards guiados na conversa da guia (vazio fora da configuração ou em outra conversa). */
     blocoNaConversa(conversaId: string): string {
+      if (pulouEm !== null && pulouEm === conversaId) return `<div class="ct-conversa ct-resolvida"><div class="ct-fala"><b>Nod</b><p>${esc(LINHA_PULOU)}</p></div></div>`;
       const e = estadoTela();
+      // ADA-242: antes dos cards, as duas perguntas (só até o objetivo chegar ao servidor; numa releitura, os cards).
+      if (jornadaA() && e?.fase === "configurando" && e.dados.guia?.conversaId === conversaId && passoTexto.passo !== "enviando" && !e.dados.campos.objetivo && !e.dados.bot) {
+        return htmlConversaTexto(passoTexto, { sugestao: deps.nomeSugerido?.() ?? null, ocupado: textoOcupado, erro: textoErro });
+      }
       if (!e || (e.fase !== "configurando" && e.fase !== "fim") || e.dados.guia?.conversaId !== conversaId) return "";
       return htmlGuia(e);
     },
     acoes,
     forms,
     deNovo,
+    verificarMaquina,
     /** NOD-209: "Trocar conta" num cartão do onboarding (web/lib/ias-do-mac.ts avisa o começo e o fim). */
     comecarTroca: (ia: IaDesktop): void => teste.comecarTroca(ia),
     fimDaTroca: (ia: IaDesktop, trocou: boolean): void => teste.fimDaTroca(ia, trocou),
@@ -506,6 +649,13 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       acabouDeConcluir = false;
       iaEntrando = null;
       notaIa = null;
+      naTelaComputador = false;
+      soComputador = false;
+      maquinaVerificada = false;
+      passoTexto = { passo: "apelido" };
+      textoErro = null;
+      pulouEm = null;
+      computador.descartar();
       teste.descartar();
     },
   };

@@ -276,7 +276,7 @@ export type RotaDoServidor = { metodo: string; padrao: RegExp; acao?: string; in
  */
 export const CAMINHOS_DAS_ACOES_DE_CONTA: Record<string, RegExp> = {
   "conta.trocar_senha": /^\/conta\/senha$/,
-  "conta.entrar": /^\/conta(\/(cadastro|reenviar|verificar|entrar|importar|outra|cancelar|recuperar|redefinir|google|provisorio|troca-app))?$/,
+  "conta.entrar": /^\/conta(\/(cadastro|reenviar|verificar|entrar|importar|outra|cancelar|recuperar|redefinir|google|google\/trocar|codigo|provisorio|troca-app))?$/,
   "conta.parear_aparelho": /^\/conta\/parear/,
   "conta.sair_das_outras": /^\/conta\/(sair-das-outras|sessoes)$/,
   "conta.editar_perfil": /^\/conta\/eu(\/(perfil|foto|reautenticar.*))?$/,

@@ -247,6 +247,10 @@ vários bots rodam `npm run check` ao mesmo tempo sem um contaminar o tenant pad
   laço da exportação e a seção em Seu espaço (o modo da sessão diz `contas.minhaConta`); `NOD_PURGA_CONTA=1` (exige a
   anterior) liga a purga 30 dias depois da exclusão. Em produção a purga fica desligada até a revisão LGPD: a exclusão
   fica programada e a tela diz isso.
+- **Onboarding por texto atrás de flag** (ADR-157, ADA-242): `NOD_ONBOARDING_TEXTO=1` (exige `NOD_CONTAS`) liga
+  `POST /api/conta/codigo` (conta sem senha, identidade `email`), o Google no app (`/api/conta/google {app,porta,estado}`
+  → loopback → `POST /api/conta/google/trocar` com a prova) e a conversa por texto no lugar da ligação. O modo da sessão
+  diz `contas.onboardingTexto`. Desligada, a rota de código responde 404 e tudo segue como antes.
 - **PRs do GitHub no quadro atrás de env** (NOD-421): `NOD_QUADRO_GITHUB_REPOS="dono/repo,…"` (até 5) liga o laço
   `src/adapters/fundo/prs-do-quadro.ts`. A cada 30 s ele lê os PRs de cada repo, com `NOD_QUADRO_GITHUB_TOKEN` por uma
   chamada GraphQL (produção: a imagem não tem `gh`; o token vem do segredo `nod-github-quadro-token`; a base é

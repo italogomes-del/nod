@@ -221,3 +221,27 @@
   /* O "olá" cobre a janela inteira: o contorno vai para dentro. */
   .ob-ola:focus-visible { outline: 2px solid Highlight; outline-offset: -4px; }
 }
+
+/* ADA-242 (jornada A, NOD_ONBOARDING_TEXTO): "Este computador" (web/telas/este-computador.ts) e a conversa por texto
+   (web/telas/conversa-texto.ts). Mesmo sistema visual dos cards da IA: superfície, linha, raio 20, cor só com sentido. */
+.ec-tela { gap: 16px; }
+.ec-selo { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+.ec-lista { display: flex; flex-direction: column; gap: 10px; width: min(520px, 100%); }
+.ec-ia { display: grid; grid-template-columns: auto 1fr; gap: 12px 14px; align-items: center; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; text-align: left; }
+.ec-ia.principal { border-color: var(--ink-2, var(--line)); }
+.ec-ia-txt { display: flex; flex-direction: column; gap: 2px; }
+.ec-ia-txt span { color: var(--ink-2); font-size: 14px; }
+.ec-acoes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.ec-acoes:empty { display: none; }
+.ec-codigo { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; width: 100%; }
+.ec-nota { color: var(--danger, inherit); }
+.ec-pe { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.ct-conversa { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; }
+.ct-topo { display: flex; justify-content: flex-end; }
+.ct-fala b { display: block; font-size: 13px; }
+.ct-fala p { margin: 2px 0 0; }
+.ct-resposta { display: flex; flex-direction: column; gap: 10px; }
+.ct-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ct-chip { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.ct-chip:hover, .ct-chip:focus-visible { border-color: var(--ink-2, currentColor); }
+.ct-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }

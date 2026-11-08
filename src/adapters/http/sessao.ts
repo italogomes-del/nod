@@ -97,7 +97,7 @@ export function opcoesSessaoDoEnv(
  * entra `POST /sessao/sair`. Sem `contas`, tudo como antes: nenhuma consulta e nenhuma rota nova.
  */
 /** `minhaConta` (NOD-346): NOD_MINHA_CONTA ligada; a web só mostra a seção Minha conta com ela. */
-export type ContasNaSessao = { guarda: GuardaSessao; google: boolean; bootstrap: boolean; minhaConta?: boolean; rotas?: Rota[] };
+export type ContasNaSessao = { guarda: GuardaSessao; google: boolean; bootstrap: boolean; minhaConta?: boolean; onboardingTexto?: boolean; rotas?: Rota[] };
 
 export type SessaoMontada = {
   modo: ModoLogin;
@@ -120,7 +120,7 @@ export function criarSessao(segredo: string, opcoes: OpcoesSessao = { modo: "stu
       },
     },
   ];
-  const extraModo = contas ? { contas: { google: contas.google, bootstrap: contas.bootstrap, ...(contas.minhaConta ? { minhaConta: true } : {}) } } : {};
+  const extraModo = contas ? { contas: { google: contas.google, bootstrap: contas.bootstrap, ...(contas.minhaConta ? { minhaConta: true } : {}), ...(contas.onboardingTexto ? { onboardingTexto: true } : {}) } } : {};
   const seguro = opcoes.modo === "google" && opcoes.google.redirectUri.startsWith("https://");
   /** Cunha o cookie da pessoa: com contas, cria a sessão no banco e põe o sid. */
   const cookiePara = async (escopo: Escopo, req: IncomingMessage, maxAgeS?: number): Promise<string> => {

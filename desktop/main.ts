@@ -62,6 +62,8 @@ import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import { pedirProvisorio, segredoDeTroca, servidorOfereceProvisorio, trocarChaveDoApp, verificadorNovo, verificadorValido } from "./conta-provisoria.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
+import { criarGoogleNoApp } from "./google-conta.ts";
+import { esteComputadorEm } from "./este-computador.ts";
 import { IDIOMA_DO_APP, templateDoMenu } from "./menu.ts";
 import { aoRecusarVersao, confirmarReinicio, sairAoFecharJanelas, criarAtualizacaoDoApp, servidorDeAtualizacao, linhaDaAtualizacao, linkDownloadMac, type CaixaReinicio, TEXTOS_ATUALIZACAO, type AtualizacaoDoApp, type EstadoAtualizacaoApp } from "./atualizacao.ts";
 import { criarArquivoDeLog, escreverDiagnostico, instalarOuvintesDeQueda, lerCaudaDoLog, MAX_BYTES_LOG } from "./diagnostico.ts";
@@ -1649,6 +1651,27 @@ else {
       catch (erro) { mensagem = erro instanceof FalhaPonte ? mensagens[erro.codigo]! : "Conecte novamente para continuar."; await mostrarSetup(); return false; }
       finally { conectando = false; }
     });
+    // ADA-242 (ADR-157 §3): o Google para conta dentro do app. A prova é a mesma do segredo de troca acima.
+    const google = criarGoogleNoApp({
+      servidor: () => configuracao?.url ?? null,
+      prova: troca.prova,
+      abrirExterno: (u) => shell.openExternal(u),
+      aoEntrar: async (chave) => {
+        if (!configuracao) return;
+        conectando = true;
+        try { await conectar({ url: configuracao.url, chave }); }
+        catch (erro) { mensagem = erro instanceof FalhaPonte ? mensagens[erro.codigo]! : "Conecte novamente para continuar."; await mostrarSetup(); }
+        finally { conectando = false; }
+      },
+      registrar: (evento, dados) => log("aviso", evento, dados),
+    });
+    ipcMain.handle(CANAIS_DESKTOP.googleAbrir, (e) => { validarRemetenteWeb(e); return google.abrir(); });
+    ipcMain.handle(CANAIS_DESKTOP.googleIr, (e, url: unknown) => { validarRemetenteWeb(e); return google.ir(url); });
+    ipcMain.handle(CANAIS_DESKTOP.googleCancelar, (e) => { validarRemetenteWeb(e); google.cancelar(); });
+    // ADA-242 (ADR-157 §4): o "já vi" da tela Este computador, nesta máquina.
+    const esteComputador = esteComputadorEm(app.getPath("userData"));
+    ipcMain.handle(CANAIS_DESKTOP.esteComputadorJaViu, (e) => { validarRemetenteWeb(e); return esteComputador.jaViu(); });
+    ipcMain.handle(CANAIS_DESKTOP.esteComputadorMarcar, (e) => { validarRemetenteWeb(e); return esteComputador.marcar(); });
     // NOD-406: quem é da equipe sai do provisório e conecta com a chave de Chaves (a tela de conexão de antes).
     // Só desfaz uma conexão provisória, com confirmação. A conexão salva some (fechar o app antes de conectar devolve o
     // mesmo provisório: o verificador da instalação fica); a marca só nasce quando a conexão pela tela der certo.

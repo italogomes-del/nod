@@ -16,3 +16,15 @@ export async function cabecalhosDoApp(mac: Pick<NodDesktop, "desafioConta" | "tr
   if (!d) { desafio = null; throw new AppDesatualizado(); }
   return { cabecalhos: { "x-nod-app-desafio": d } };
 }
+
+/**
+ * ADA-242 (ADR-157 §3): o Google para conta no app pede só o desafio (a troca é do processo principal, por
+ * `googleConta`), por isso não exige `trocarConta` como `cabecalhosDoApp`.
+ */
+export async function cabecalhosDoGoogleApp(app: Pick<NodDesktop, "desafioConta"> | undefined): Promise<{ cabecalhos: Record<string, string> }> {
+  if (!app?.desafioConta) throw new AppDesatualizado();
+  desafio ??= app.desafioConta().catch(() => null);
+  const d = await desafio;
+  if (!d) { desafio = null; throw new AppDesatualizado(); }
+  return { cabecalhos: { "x-nod-app-desafio": d } };
+}

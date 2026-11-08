@@ -37,6 +37,7 @@ describeIntegracao("0049: CHECKs do onboarding (o backfill é testado em tests/c
 
 describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
   let servidor: ServidorDeTeste;
+  let servidorTexto: ServidorDeTeste;
   let trxAtual: Tx | null = null;
   let contexto: ContextoLigacao = CONTEXTO_LIBERADO;
   const registradas: SaidaLigar[] = [];
@@ -62,7 +63,7 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       prazoDecisaoMs: 60_000,
       executor: "catcher",
     };
-    servidor = await servidorDeTeste(criarRotasOnboarding({
+    const rotas = (onboardingTexto: boolean) => criarRotasOnboarding({
       ...deps,
       executorDoMac: () => ({ pronto: false, ias: [{ id: "claude-cli", estado: "nao_autenticado" }, { id: "codex-cli", estado: "ausente" }] }),
       contexto: async () => contexto,
@@ -70,9 +71,33 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       liberar: (id) => liberadas.push(id),
       encerrarViva: async (id) => { encerradas.push(id); },
       fusoPadrao: "America/Sao_Paulo",
-    }));
+      onboardingTexto,
+    });
+    servidor = await servidorDeTeste(rotas(false));
+    servidorTexto = await servidorDeTeste(rotas(true));
   });
-  afterAll(() => servidor.close());
+  afterAll(async () => { await servidor.close(); await servidorTexto.close(); });
+
+  it("ADA-242: com NOD_ONBOARDING_TEXTO, 'configurando' grava as duas respostas do texto (e o objetivo vira memória do Nod); desligada, ignora", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const respostas = { apelido: "  Ana  ", objetivo: "Atender clientes por e-mail", tamanhoTime: "2_10" };
+      const desligada = await servidor.entrar("marlon");
+      const sem = (await (await servidor.chamar(desligada, "POST", "onboarding/etapa", { etapa: "configurando", semVoz: true, respostas })).json()) as EstadoOnboarding;
+      expect(sem.campos).toMatchObject({ apelido: null, objetivo: null });
+
+      const ligada = await servidorTexto.entrar("marlon");
+      await servidorTexto.chamar(ligada, "GET", "onboarding");
+      const com = (await (await servidorTexto.chamar(ligada, "POST", "onboarding/etapa", { etapa: "configurando", semVoz: true, respostas })).json()) as EstadoOnboarding;
+      expect(com).toMatchObject({ etapa: "configurando", campos: { apelido: "Ana", objetivo: "Atender clientes por e-mail", tamanhoTime: null } });
+      const memorias = await trx`select texto from agente_memorias where agente_id = ${com.guia?.id ?? ""}`;
+      expect(memorias.map((m) => m.texto)).toContain("Ana quer que os bots: Atender clientes por e-mail");
+      // Pular as perguntas: sem respostas (ou vazias), nada é gravado e a etapa segue.
+      const vazio = (await (await servidorTexto.chamar(ligada, "POST", "onboarding/etapa", { etapa: "configurando", semVoz: true, respostas: { apelido: " ", objetivo: 7 } })).json()) as EstadoOnboarding;
+      expect(vazio.campos).toMatchObject({ apelido: "Ana", objetivo: "Atender clientes por e-mail" });
+      trxAtual = null;
+    });
+  });
 
   it("sem voz: olá → executor → chamando recusada → configurando sem voz → bot e rotina pelo clique → concluir; concluído não reabre sem o olá", async () => {
     await withRollback(MARLON, async (trx) => {

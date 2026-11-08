@@ -22,7 +22,8 @@ import { desteMac, nesteMac, terminalDaqui } from "../lib/plataforma-da-tela.ts"
  */
 
 /** O que a tela mostra agora: as etapas do servidor mais a abertura local ("olá" ainda não passou). */
-export type FaseTela = "ola" | "executor" | "chamando" | "entrevista" | "configurando" | "fim";
+/** "computador": a tela "Este computador" da jornada A (ADA-242, web/telas/este-computador.ts), só com NOD_ONBOARDING_TEXTO. */
+export type FaseTela = "ola" | "computador" | "executor" | "chamando" | "entrevista" | "configurando" | "fim";
 
 export type EstadoTelaOnboarding = {
   dados: EstadoOnboarding;

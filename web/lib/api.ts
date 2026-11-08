@@ -14,7 +14,7 @@ import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
-import { cabecalhosDoApp } from "./desafio-app.ts";
+import { cabecalhosDoApp, cabecalhosDoGoogleApp } from "./desafio-app.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { InstalacaoCriadaDto, InstalacaoSshDto, MetodoSsh } from "../../src/contracts/instalacoes-ssh.ts";
 import type { CadastroDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, RedefinirDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
@@ -667,6 +667,11 @@ export const contaApi = {
   pedirPareamento: (codigo: string) => pedir<PedirPareamentoDto>("POST", "/api/conta/parear/pedir", { codigo }),
   esperarPareamento: async () => pedir<EsperaPareamentoDto>("GET", "/api/conta/parear/pedido", undefined, await doApp()),
   google: (app: boolean) => pedir<{ url: string }>("POST", "/api/conta/google", { app }),
+  /** ADA-242: conta sem senha (só com NOD_ONBOARDING_TEXTO): o código vai para o e-mail e `verificar` conclui. */
+  codigo: (email: string) => pedir<CadastroDto>("POST", "/api/conta/codigo", { email }),
+  /** ADA-242: o Google dentro do app; porta e estado vêm do loopback do processo principal (`googleConta.abrir`). */
+  googleApp: async (porta: number, estado: string) =>
+    pedir<{ url: string }>("POST", "/api/conta/google", { app: true, porta, estado }, await cabecalhosDoGoogleApp(typeof window === "undefined" ? undefined : window.nodDesktop)),
 };
 
 /** NOD-346 (ADR-126): Minha conta. As ações de risco voltam 403 com `motivo: reautenticar` até a pessoa confirmar quem é. */

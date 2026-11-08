@@ -95,6 +95,16 @@ const ponte: NodDesktop = {
   trocarConta: (codigo: string) => ipcRenderer.invoke(CANAIS_DESKTOP.trocarConta, codigo),
   desafioConta: () => ipcRenderer.invoke(CANAIS_DESKTOP.desafioConta),
   souDaEquipe: () => ipcRenderer.invoke(CANAIS_DESKTOP.souDaEquipe),
+  // ADA-242: o Google para conta dentro do app e o "já vi" da tela Este computador; o processo principal valida tudo.
+  googleConta: {
+    abrir: () => ipcRenderer.invoke(CANAIS_DESKTOP.googleAbrir),
+    ir: (url: string) => ipcRenderer.invoke(CANAIS_DESKTOP.googleIr, url),
+    cancelar: () => ipcRenderer.invoke(CANAIS_DESKTOP.googleCancelar),
+  },
+  esteComputador: {
+    jaViu: () => ipcRenderer.invoke(CANAIS_DESKTOP.esteComputadorJaViu),
+    marcar: () => ipcRenderer.invoke(CANAIS_DESKTOP.esteComputadorMarcar),
+  },
   // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
   vmTentarAgora: () => ipcRenderer.invoke(CANAIS_DESKTOP.vmTentarAgora),
   aoAbrir: (fn: (alvo: AlvoAviso) => void) => {

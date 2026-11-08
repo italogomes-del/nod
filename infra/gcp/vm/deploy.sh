@@ -40,10 +40,11 @@ NOD_BOOTSTRAP="$(limpo "${NOD_BOOTSTRAP:-}")"
 NOD_PROVISORIO_COTA_TURNOS="$(limpo "${NOD_PROVISORIO_COTA_TURNOS:-}")"
 NOD_ANTIABUSO="$(limpo "${NOD_ANTIABUSO:-}")"
 NOD_EMAIL_REMETENTE="$(limpo "${NOD_EMAIL_REMETENTE:-}")"
+NOD_ONBOARDING_TEXTO="$(limpo "${NOD_ONBOARDING_TEXTO:-}")"
 for v in NOD_CONTAS_GOOGLE NOD_MINHA_CONTA NOD_PURGA_CONTA; do
   [ -z "$(limpo "${!v:-}")" ] || { echo "$v ainda não é levado pelo deploy (NOD-406): tire a linha do config.env" >&2; exit 1; }
 done
-for v in NOD_CONTAS NOD_BOOTSTRAP; do
+for v in NOD_CONTAS NOD_BOOTSTRAP NOD_ONBOARDING_TEXTO; do
   case "${!v}" in ""|1) ;; *) echo "$v só aceita 1 ou vazio no config.env (o servidor compara por === \"1\")" >&2; exit 1 ;; esac
 done
 case "$NOD_ANTIABUSO" in ""|1) ;; *) echo "NOD_ANTIABUSO só aceita 1 ou vazio" >&2; exit 1 ;; esac
@@ -298,6 +299,8 @@ NOD_PROVISORIO_COTA_TURNOS=$NOD_PROVISORIO_COTA_TURNOS
 NOD_ANTIABUSO=$NOD_ANTIABUSO
 NOD_EMAIL_REMETENTE=${NOD_CONTAS:+$NOD_EMAIL_REMETENTE}
 NOD_RESEND_API_KEY=$RESEND_CHAVE
+# ADA-242 (ADR-157): onboarding por texto, conta por código e Google no app. Vazio = desligado.
+NOD_ONBOARDING_TEXTO=$NOD_ONBOARDING_TEXTO
 EOF
 mv "nod-$NOVA.env.novo" "nod-$NOVA.env"
 if [ "$NOVA" = azul ]; then gravar_imagens "$IMAGEM" "$(imagem_de verde)"; else gravar_imagens "$(imagem_de azul)" "$IMAGEM"; fi

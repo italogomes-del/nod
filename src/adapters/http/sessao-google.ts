@@ -65,6 +65,13 @@ export type ConfigGoogle = {
     aoVoltar(bilhete: string, g: { iss: string; sub: string; email: string; autoridade: boolean }, req: IncomingMessage): Promise<{ setCookie: string | null; pagina: string }>;
     /** Sem bilhete: a conta cujo Google (iss+sub) é este entra; null = segue o login de antes (allowlist). */
     entrarSemBilhete(g: { iss: string; sub: string }, req: IncomingMessage): Promise<{ setCookie: string; pagina: string } | null>;
+    /**
+     * ADA-242 (ADR-157 §3): o bilhete do Google pedido pelo APP (`?conta-app=`). Vale sem o cookie (o navegador do
+     * sistema não tem a sessão do app): quem amarra é o desafio do processo principal, conferido na troca.
+     */
+    bilheteApp?(bilhete: string): boolean;
+    /** A volta de um bilhete do app: guarda a identidade e devolve o endereço do loopback; null = não é bilhete do app. */
+    aoVoltarApp?(bilhete: string, g: { iss: string; sub: string; email: string; autoridade: boolean }): Promise<string | null>;
   };
   /** Injetáveis para o teste nunca falar com o Google. */
   fetchImpl?: typeof fetch;
@@ -213,8 +220,12 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
       padrao: /^\/sessao\/google$/,
       publica: true,
       async handler(ctx) {
-        const pedido = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("conta");
-        const bilhete = cfg.conta && pedido && pedido.length <= 600 && cfg.conta.bilheteDoNavegador(pedido, ctx.req) ? pedido : undefined;
+        const params = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams;
+        const doApp = params.get("conta-app");
+        const pedido = doApp ?? params.get("conta");
+        const bilhete = !cfg.conta || !pedido ? undefined
+          : doApp !== null ? (doApp.length <= 1000 && cfg.conta.bilheteApp?.(doApp) ? doApp : undefined)
+          : pedido.length <= 600 && cfg.conta.bilheteDoNavegador(pedido, ctx.req) ? pedido : undefined;
         // Bilhete de outro navegador (um link recebido) ou vencido: não vira login de antes por engano.
         if (pedido !== null && !bilhete) {
           ctx.res.writeHead(302, { location: "/?conta=recusado", "cache-control": "no-store" });
@@ -279,6 +290,12 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
         if (bilhete && cfg.conta) {
           const g = validarClaimsConta(claims, { clientId: cfg.clientId, agora: agora() });
           if (!g.ok) return recusar(g.motivo);
+          const loopback = cfg.conta.aoVoltarApp ? await cfg.conta.aoVoltarApp(bilhete, g) : null;
+          if (loopback) {
+            ctx.res.writeHead(302, { location: loopback, "set-cookie": apagarState, "cache-control": "no-store" });
+            ctx.res.end();
+            return;
+          }
           const r = await cfg.conta.aoVoltar(bilhete, g, ctx.req);
           ctx.res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": r.setCookie ? [r.setCookie, apagarState] : [apagarState], "cache-control": "no-store" });
           ctx.res.end(r.pagina);

@@ -30,6 +30,11 @@ export type DepsRotasConta = {
   /** Google para conta ligado (NOD_LOGIN=google com client externo). */
   google: boolean;
   agora(): number;
+  /**
+   * NOD_ONBOARDING_TEXTO=1 (ADA-242, ADR-157): conta sem senha (`POST /conta/codigo`) e Google dentro do app (bilhete
+   * `conta-app` + `POST /conta/google/trocar`). Desligada, as rotas novas respondem 404 e o resto fica como antes.
+   */
+  onboardingTexto?: boolean;
   /** NOD_MINHA_CONTA=1 (NOD-346): as rotas `/conta/eu/*`. Ausente, elas não existem. */
   minhaConta?: ServicoMinhaConta | null;
 };
@@ -129,6 +134,10 @@ export function rotasConta(d: DepsRotasConta): Rota[] {
   const rotas: Rota[] = [
     rota("GET", "", async (ctx, q) => ctx.json(200, await d.servico.estado(q))),
     rota("POST", "/cadastro", async (ctx, q, b) => ctx.json(200, await d.servico.cadastrar(q, { email: b.email, senha: b.senha }))),
+    rota("POST", "/codigo", async (ctx, q, b) => {
+      if (!d.onboardingTexto) throw new ErroDeDominio("nao_encontrado", { cause: "NOD_ONBOARDING_TEXTO desligada" });
+      ctx.json(200, await d.servico.pedirCodigo(q, { email: b.email }));
+    }),
     rota("POST", "/reenviar", async (ctx, q) => ctx.json(200, await d.servico.reenviar(q))),
     rota("POST", "/verificar", async (ctx, q, b) => ctx.json(200, await d.servico.verificar(q, { codigo: b.codigo }))),
     rota("POST", "/entrar", async (ctx, q, b) => {
@@ -164,6 +173,14 @@ export function rotasConta(d: DepsRotasConta): Rota[] {
       if (r.estado === "entrou") return comSessao(ctx, r, { estado: "entrou" });
       ctx.json(200, r);
     }),
+    // ADA-242: o app troca o código do loopback do Google com a prova. Só o processo principal (sem Origin).
+    rota("POST", "/google/trocar", async (ctx, q, b) => {
+      if (!d.onboardingTexto) throw new ErroDeDominio("nao_encontrado", { cause: "NOD_ONBOARDING_TEXTO desligada" });
+      if (ctx.req.headers.origin !== undefined) throw new ErroDeDominio("nao_permitido", { cause: "troca do Google vinda de página" });
+      const r = await d.servico.trocarGoogleApp(q, { codigo: b.codigo, prova: b.prova });
+      if (!r) throw new ErroDeDominio("nao_permitido", { cause: "código do Google do app inválido" });
+      ctx.json(200, r);
+    }),
     // O app troca o código de uso único pela chave de máquina da pessoa nova. Só o app (sem Origin).
     rota("POST", "/troca-app", async (ctx, q, b) => {
       if (ctx.req.headers.origin !== undefined) throw new ErroDeDominio("nao_permitido", { cause: "troca do app vinda de página" });
@@ -175,10 +192,22 @@ export function rotasConta(d: DepsRotasConta): Rota[] {
     // bilhete só vale no navegador que tem ESTA sessão no cookie (ver contaNoGoogle.bilheteDoNavegador): um link com o
     // bilhete de outra pessoa não liga o Google de quem clica ao espaço dela. No app, o Google abre no navegador do
     // sistema, sem o cookie do app: por isso o Google para conta ainda não vale no app (só e-mail e senha).
+    // ADA-242 (ADR-157 §3): com NOD_ONBOARDING_TEXTO, o app também usa o Google. O bilhete `conta-app` leva a porta e o
+    // estado do loopback do processo principal e o desafio do segredo dele; a volta não liga nada até a troca com a prova.
     rota("POST", "/google", async (ctx, q, b) => {
       if (!d.google) throw new ErroDeDominio("estado_invalido", { cause: "Google para conta desligado" });
-      if (b.app === true) throw new ErroDeDominio("estado_invalido", { cause: "Google para conta ainda não vale no app" });
+      if (b.app === true && !d.onboardingTexto) throw new ErroDeDominio("estado_invalido", { cause: "Google para conta ainda não vale no app" });
       if (!q.escopo || !q.sid) throw new ErroDeDominio("nao_permitido", { cause: "sem sessão" });
+      if (b.app === true) {
+        const porta = b.porta;
+        const estado = b.estado;
+        if (!q.desafioApp) throw new ErroDeDominio("nao_permitido", { cause: "Google do app sem desafio" });
+        if (typeof porta !== "number" || !Number.isInteger(porta) || porta < 1024 || porta > 65535) throw new ErroDeDominio("entrada_invalida", { cause: "porta" });
+        if (typeof estado !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(estado)) throw new ErroDeDominio("entrada_invalida", { cause: "estado" });
+        const bilhete = cunharBilheteApp(d.segredo, { escopo: q.escopo, sid: q.sid, t: d.agora(), porta, estado, desafio: q.desafioApp });
+        ctx.json(200, { url: `/api/sessao/google?conta-app=${encodeURIComponent(bilhete)}` });
+        return;
+      }
       const bilhete = cunharBilhete(d.segredo, { escopo: q.escopo, sid: q.sid, t: d.agora() });
       ctx.json(200, { url: `/api/sessao/google?conta=${encodeURIComponent(bilhete)}` });
     }),
@@ -293,8 +322,31 @@ export function lerBilhete(segredo: string, valor: string, agora: number): Bilhe
   }
 }
 
+/** ADA-242: o bilhete do Google pedido pelo app. Outro `k`: um não passa pelo outro. */
+type BilheteApp = Bilhete & { porta: number; estado: string; desafio: string };
+
+export function cunharBilheteApp(segredo: string, b: BilheteApp): string {
+  const payload = Buffer.from(JSON.stringify({ k: "conta-app", tn: b.escopo.tenantId, p: b.escopo.pessoaId, s: b.sid, t: b.t, po: b.porta, e: b.estado, d: b.desafio }), "utf8").toString("base64url");
+  return `${payload}.${assinar(payload, segredo)}`;
+}
+
+export function lerBilheteApp(segredo: string, valor: string, agora: number): BilheteApp | null {
+  const payload = lerAssinado(valor, segredo);
+  if (!payload) return null;
+  try {
+    const o = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (o.k !== "conta-app" || typeof o.tn !== "string" || typeof o.p !== "string" || typeof o.s !== "string" || typeof o.t !== "number") return null;
+    if (typeof o.po !== "number" || !Number.isInteger(o.po) || o.po < 1024 || o.po > 65535) return null;
+    if (typeof o.e !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(o.e) || typeof o.d !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(o.d)) return null;
+    if (agora - o.t < 0 || agora - o.t > BILHETE_MS) return null;
+    return { escopo: { tenantId: o.tn, pessoaId: o.p }, sid: o.s, t: o.t, porta: o.po, estado: o.e, desafio: o.d };
+  } catch {
+    return null;
+  }
+}
+
 /** O lado de sessao-google.ts da conta: confere o bilhete, chama o serviço e diz para onde a página vai. */
-export function contaNoGoogle(d: Pick<DepsRotasConta, "servico" | "guarda" | "segredo" | "seguro" | "agora">) {
+export function contaNoGoogle(d: Pick<DepsRotasConta, "servico" | "guarda" | "segredo" | "seguro" | "agora" | "onboardingTexto">) {
   const cookieDe = (s: SessaoNova) => cabecalhoCookieSessao(s.escopo, d.segredo, d.seguro, PERMANENCIA_SESSAO_S, s.sid);
   return {
     /**
@@ -313,6 +365,20 @@ export function contaNoGoogle(d: Pick<DepsRotasConta, "servico" | "guarda" | "se
       const r = await d.servico.voltaGoogle(q, g);
       if (r.resultado === "entrou") return { setCookie: cookieDe(r.sessao), pagina: paginaIndoPara("/?conta=entrou") };
       return { setCookie: null, pagina: paginaIndoPara(`/?conta=${r.resultado}`) };
+    },
+    bilheteApp: (bilhete: string): boolean => d.onboardingTexto === true && lerBilheteApp(d.segredo, bilhete, d.agora()) !== null,
+    /**
+     * A volta do bilhete do app: a sessão ainda vive? Guarda a identidade num código de uso único e manda o navegador ao
+     * loopback do app (127.0.0.1, a porta e o estado do bilhete). Sessão morta: o loopback recebe `erro=sessao`.
+     */
+    async aoVoltarApp(bilhete: string, g: { iss: string; sub: string; email: string; autoridade: boolean }): Promise<string | null> {
+      const b = d.onboardingTexto ? lerBilheteApp(d.segredo, bilhete, d.agora()) : null;
+      if (!b) return null;
+      const destino = new URL(`http://127.0.0.1:${b.porta}/retorno`);
+      destino.searchParams.set("estado", b.estado);
+      if (!(await d.guarda.conferir(b.escopo, b.sid))) destino.searchParams.set("erro", "sessao");
+      else destino.searchParams.set("codigo", await d.servico.guardarGoogleApp({ escopo: b.escopo, sid: b.sid, desafio: b.desafio }, g));
+      return destino.toString();
     },
     /** Sem bilhete: entra só se este Google já está ligado a uma conta; null = segue o login de antes. */
     async entrarSemBilhete(g: { iss: string; sub: string }, req: IncomingMessage): Promise<{ setCookie: string; pagina: string } | null> {

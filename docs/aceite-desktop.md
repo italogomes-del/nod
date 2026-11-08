@@ -159,3 +159,32 @@ pior caso.
 **Não se aplica até a NOD-132** estar na versão. Quando estiver: com uma candidata assinada instalada, publicar a
 seguinte e confirmar que o app avisa, baixa, reinicia na versão nova e reconecta como em F. Reprova se: não avisa,
 baixa sem assinatura válida, ou perde a conexão.
+
+## J. Jornada A: pessoa nova, nada instalado (ADA-242, `NOD_ONBOARDING_TEXTO=1`)
+
+Spec `docs/specs/onboarding-jornada-a.md`, ADR-157. Rodar **duas vezes**: num Mac limpo e num Windows limpo (VM de QA,
+ADA-233/235), sem Claude nem Codex instalados e sem pasta do app (`este-computador.json` ausente). Servidor com a flag
+ligada e o Google configurado.
+
+- [ ] **Conta sem senha.** Abrir o app, **Usar e-mail**: o cartão pede só o e-mail e manda um código; com o código, a
+  conta existe. Reprova se: aparece campo de senha ou o código não chega.
+- [ ] **Google dentro do app.** Numa segunda máquina limpa, **Continuar com Google**: o navegador do sistema abre; ao
+  terminar lá, a aba diz "Pode fechar esta aba" e o app segue sozinho para "Conta criada" (ou a escolha, se o e-mail já
+  tem conta). **Cancelar** no meio fecha a espera e nada muda. Reprova se: o app pede para colar algo, a conta liga sem
+  o app voltar, ou o navegador mostra erro de redirect.
+- [ ] **Este computador (2c → 2d → 2a).** Depois do "olá", a tela "Este computador" mostra Claude (recomendado) e
+  ChatGPT com **Instalar e entrar**. Clicar no do Claude: instala, abre o login no navegador (2d, "Eu continuo daqui");
+  ao entrar lá, a tela vira 2a ("O Claude já está aqui", "Conectado como …") e **Continuar** leva à conversa.
+  Reprova se: aparece "Mac" no Windows (ou "Windows" no Mac), "Outras IAs" nesta tela, ou a ligação toca.
+- [ ] **Estados de falha.** Com a rede cortada durante **Instalar e entrar**: 2e ("A instalação não terminou", **Tentar
+  de novo**). Abrindo o login e não terminando por 2 min: 2f (**Conferir de novo**, **Abrir de novo**; no Mac, o campo
+  do código do Claude). Com uma conta de organização sem acesso: 2g (**Entrar com outra conta**).
+- [ ] **Pular por agora.** Numa máquina limpa, **Pular por agora**: vai à conversa por texto e o app abre sem IA (os
+  bots avisam que estão sem IA). Fechar e reabrir o app: a tela "Este computador" **não** volta nesta máquina; numa
+  reinstalação limpa (pasta do app apagada; no Windows, `%APPDATA%\nod-motor`), volta.
+- [ ] **Conversa por texto.** Na conversa do Nod: "Posso te chamar de X?" (X do e-mail) e "o que você quer que os bots
+  façam por você?" com os cinco chips; escolher um mostra os cards de sempre (Novo bot, app, rotina). **Pular as
+  perguntas** encerra e deixa uma linha dizendo onde montar um bot. Reprova se: pergunta o tamanho do time ou não
+  há como pular.
+- [ ] **Flag desligada.** Com `NOD_ONBOARDING_TEXTO` desligada, o onboarding é o de antes (ligação, cadastro com senha,
+  sem Google no app). Reprova se: algo da jornada A aparece.

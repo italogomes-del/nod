@@ -1,5 +1,6 @@
 import type { CadastroDto, ContagemEspacoDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, SessaoContaDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
 import type { EtapaPeloChat } from "../../src/contracts/ferramentas-conta.ts";
+import type { PonteGoogleConta, ResultadoGoogleConta } from "../../src/contracts/desktop-conta-app.ts";
 import { AppDesatualizado, ErroApi } from "../lib/erro-api.ts";
 import { esc } from "../lib/render.ts";
 import { nesteAparelho } from "../lib/aparelho.ts";
@@ -32,6 +33,10 @@ export type ApiConta = {
   pedirPareamento(codigo: string): Promise<PedirPareamentoDto>;
   esperarPareamento(): Promise<EsperaPareamentoDto>;
   google(app: boolean): Promise<{ url: string }>;
+  /** ADA-242 (NOD_ONBOARDING_TEXTO): conta só com o código do e-mail. Ausente = sem o caminho novo. */
+  codigo?(email: string): Promise<CadastroDto>;
+  /** ADA-242: a URL do Google dentro do app, com a porta e o estado do loopback do processo principal. */
+  googleApp?(porta: number, estado: string): Promise<{ url: string }>;
 };
 /** Sem DOM nos tipos: o módulo compila também no tsconfig dos testes (o HTMLElement e o form da página cabem aqui). */
 type ElAcao = { dataset: { [k: string]: string | undefined } };
@@ -50,14 +55,18 @@ export type Etapa =
   | { tipo: "parear-pronto" }
   | { tipo: "parear-gerar"; codigo: string; expiraEm: number; pedido: { aparelho: string; simbolos: string[] } | null; vencido: boolean }
   | { tipo: "parear-entrar"; simbolos: string[] | null; erro: string | null }
-  | { tipo: "google-app" };
+  | { tipo: "google-app" }
+  /** ADA-242: só o e-mail (sem senha); o código que chega conclui. */
+  | { tipo: "email"; erro: string | null }
+  /** ADA-242: o Google dentro do app, esperando a volta pelo loopback (sem "Já terminei": o app sabe quando acaba). */
+  | { tipo: "google-app-esperando" };
 
 /**
  * `equipe` (NOD-406): o endereço do "Entrar com Google" da equipe (ADR-030, o login de antes), quando o servidor entra
  * pelo Google e o Google para conta está desligado. Com o espaço provisório ligado, quem é da equipe e abre um navegador
  * novo cai no provisório: sem este link, a única porta seria o e-mail, que a pessoa de time não tem. Ausente = nada.
  */
-export type VistaConta = { etapa: Etapa | null; ocupado: boolean; resolvidas: readonly string[]; google: boolean; agora: number; equipe?: string | null };
+export type VistaConta = { etapa: Etapa | null; ocupado: boolean; resolvidas: readonly string[]; google: boolean; agora: number; equipe?: string | null; texto?: boolean };
 
 const SELO = `<span class="cc-selo">Conta no nod</span>`;
 const SIMBOLO: Record<string, string> = { sol: "☀️", lua: "🌙", estrela: "⭐", folha: "🍃", onda: "🌊", montanha: "⛰️", chave: "🔑", barco: "⛵", flor: "🌸", nuvem: "☁️", raio: "⚡", peixe: "🐟" };
@@ -93,7 +102,7 @@ function linhaSessao(s: SessaoContaDto, atual: string, agora: number): string {
 const simbolos = (lista: readonly string[]) => `<p class="cc-simbolos" aria-label="${esc(lista.join(", "))}">${lista.map((s) => `<span title="${esc(s)}">${SIMBOLO[s] ?? esc(s)}</span>`).join("")}</p>`;
 
 /** O cartão ativo. Puro: a vista entra, o HTML sai (os testes leem isto). */
-export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agora: number; equipe?: string | null }): string {
+export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agora: number; equipe?: string | null; texto?: boolean }): string {
   const o = v.ocupado;
   // `bt`: o mesmo alvo de toque dos outros links do rodapé (44 px no celular, ADR-094).
   const equipe = v.equipe ? `<a class="bt cc-link" href="${esc(v.equipe)}">Sou da equipe: entrar com Google</a>` : "";
@@ -102,7 +111,7 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
       return cartao(
         "Guarde seu espaço numa conta",
         `<p class="cc-texto">${e.cota ? "Você usou as mensagens sem conta. Crie uma conta para continuar: nada do que você fez se perde, e sua mensagem ficou no campo." : `Hoje ele está só ${nesteAparelho()}. Com uma conta, você entra de qualquer lugar e não perde nada.`}</p>
-        <div class="cc-acoes cc-coluna">${v.google ? bt("conta-google", "Continuar com Google", { classe: "pri", ocupado: o }) : ""}${bt("conta-ir", e.cota && !v.google ? "Criar conta" : "Usar e-mail", { classe: v.google ? "" : "pri", dados: { etapa: "cadastro" } })}${bt("conta-fechar", "Agora não", { classe: "cc-link" })}</div>
+        <div class="cc-acoes cc-coluna">${v.google ? bt("conta-google", "Continuar com Google", { classe: "pri", ocupado: o }) : ""}${bt("conta-ir", e.cota && !v.google ? "Criar conta" : "Usar e-mail", { classe: v.google ? "" : "pri", dados: { etapa: v.texto ? "email" : "cadastro" } })}${bt("conta-fechar", "Agora não", { classe: "cc-link" })}</div>
         <p class="cc-rodape">${bt("conta-ir", "Já tenho conta com e-mail", { classe: "cc-link", dados: { etapa: "entrar" } })}${bt("conta-ir", "Tenho um código", { classe: "cc-link", dados: { etapa: "parear-entrar" } })}${equipe}</p>`,
         "Criar conta ou entrar",
       );
@@ -208,6 +217,14 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
           `<form data-form="conta-parear-pedir" class="cc-form"><label class="cc-campo">Código do outro computador<input name="codigo" inputmode="numeric" autocomplete="off" pattern="[0-9 \\-]{6,8}" maxlength="8" required class="cc-codigo"></label>${erroDe(e.erro)}
           <div class="cc-acoes">${bt("conta-ir", "Voltar", { classe: "cc-link", dados: { etapa: "inicio" } })}${enviar("Entrar com código", o)}</div></form>`,
         );
+    case "email":
+      return cartao(
+        "Entrar com e-mail",
+        `<form data-form="conta-email" class="cc-form">${campoEmail()}<p class="cc-dica">Mandamos um código de 6 números. Sem senha.</p>${erroDe(e.erro)}
+        <div class="cc-acoes">${bt("conta-ir", "Voltar", { classe: "cc-link", dados: { etapa: "inicio" } })}${enviar("Mandar código", o, "Mandando…")}</div></form>`,
+      );
+    case "google-app-esperando":
+      return cartao("Termine no navegador", `<p class="cc-texto">Abrimos o Google no seu navegador. Quando terminar lá, o app continua sozinho.</p><div class="cc-acoes">${bt("conta-google-cancelar", "Cancelar", { classe: "cc-link" })}</div>`);
     case "google-app":
       return cartao("Termine no navegador", `<p class="cc-texto">Abrimos o Google no seu navegador. Quando terminar lá, volte aqui.</p><div class="cc-acoes">${bt("conta-fechar", "Cancelar", { classe: "cc-link" })}${bt("conta-reler", "Já terminei", { classe: "pri", ocupado: o })}</div>`);
   }
@@ -305,7 +322,22 @@ export type DepsConta = {
   campo: (form: Formulario, nome: string) => string;
   /** NOD-351: a pessoa já escreveu algo num campo do cartão de conta aberto? Ausente = não. */
   digitado?: () => boolean;
+  /** ADA-242 (NOD_ONBOARDING_TEXTO): "Usar e-mail" pede só o código, sem senha. Ausente = como antes. */
+  texto?: () => boolean;
+  /** ADA-242: a ponte do Google no app (Mac e Windows); null = app de antes ou web, e o Google segue como antes. */
+  googleNoApp?: () => PonteGoogleConta | null;
 };
+
+/** ADA-242: o que a volta do Google no app vira (linha resolvida); null = segue pelo estado do servidor (convertida, escolher). */
+export function linhaDoGoogleApp(r: ResultadoGoogleConta): string | null {
+  switch (r) {
+    case "convertida": case "escolher": return null;
+    case "recusado": return "O Google não confirmou esse e-mail. Use o e-mail com código; nada mudou.";
+    case "sessao": return "A sessão deste app mudou no meio do caminho. Clique em Continuar com Google de novo.";
+    case "sem_resposta": return "O Google não voltou a tempo. Clique em Continuar com Google de novo.";
+    default: return "Não deu para ligar o Google agora. Tente de novo ou use o e-mail.";
+  }
+}
 
 /** NOD-351: as etapas que o frame `conta.abrir` pode abrir. Record total no tipo: etapa nova no contrato não compila sem estar aqui. */
 const ETAPAS_PELO_CHAT: Record<EtapaPeloChat, true> = { inicio: true, entrar: true, senha: true, recuperar: true, sessoes: true, "parear-gerar": true };
@@ -367,6 +399,7 @@ export function criarContaNoChat(deps: DepsConta) {
     switch (qual) {
       case "cota": return { tipo: "inicio", cota: true };
       case "cadastro": return { tipo: "cadastro", erro: null };
+      case "email": return deps.texto?.() && deps.api().codigo ? { tipo: "email", erro: null } : { tipo: "cadastro", erro: null };
       case "entrar": return { tipo: "entrar", erro: null };
       case "recuperar": return { tipo: "recuperar", enviadoPara: null };
       case "senha": return { tipo: "senha", erro: null, salva: null };
@@ -461,7 +494,9 @@ export function criarContaNoChat(deps: DepsConta) {
       // Fechar o código ou o cartão de início deixa o espaço como está; a linha só diz isso.
       resolver(e?.tipo === "inicio" ? `Seu espaço continua só ${nesteAparelho()}. Dá para criar a conta depois, pelo menu.` : e?.tipo === "recuperar" && e.enviadoPara ? "Link de recuperação pedido." : e?.tipo === "senha" && e.salva !== null ? "Senha nova salva." : "Fechado.");
     },
-    "conta-google": () => trabalhar(async () => {
+    "conta-google": () => {
+      const ponte = deps.noApp() && deps.texto?.() ? deps.googleNoApp?.() ?? null : null;
+      return ponte ? googleNoApp(ponte) : trabalhar(async () => {
       try {
         const { url } = await deps.api().google(deps.noApp());
         if (deps.noApp()) mudar({ tipo: "google-app" });
@@ -469,7 +504,13 @@ export function criarContaNoChat(deps: DepsConta) {
       } catch (e) {
         resolver(fraseDoErro(e));
       }
-    }),
+    });
+    },
+    "conta-google-cancelar": async () => {
+      if (etapa?.tipo !== "google-app-esperando") return;
+      resolver("Fechado. Nada mudou.");
+      await deps.googleNoApp?.()?.cancelar().catch(() => undefined);
+    },
     "conta-reler": () => trabalhar(async () => {
       const e = await retomar();
       if (etapa?.tipo !== "google-app") return;
@@ -529,7 +570,46 @@ export function criarContaNoChat(deps: DepsConta) {
     }),
   };
 
+  /**
+   * ADA-242 (ADR-157 §3): o Google dentro do app. O processo principal abre o loopback, a página pede a URL com o
+   * desafio, o processo principal abre o navegador e troca o código com a prova. A espera (até 5 min) não prende o
+   * cartão em "ocupado": Cancelar fecha a porta e a volta tardia é ignorada.
+   */
+  async function googleNoApp(ponte: PonteGoogleConta): Promise<void> {
+    let url: string;
+    try {
+      ocupado = true;
+      deps.aoMudar();
+      const a = await ponte.abrir();
+      if (!a || !deps.api().googleApp) throw new AppDesatualizado();
+      url = (await deps.api().googleApp!(a.porta, a.estado)).url;
+    } catch (e) {
+      await ponte.cancelar().catch(() => undefined);
+      return resolver(fraseDoErro(e));
+    } finally {
+      ocupado = false;
+    }
+    mudar({ tipo: "google-app-esperando" });
+    const { resultado } = await ponte.ir(url).catch(() => ({ resultado: "falhou" as const }));
+    if (etapa?.tipo !== "google-app-esperando") return; // cancelado ou trocado
+    const linha = linhaDoGoogleApp(resultado);
+    if (linha) return resolver(linha);
+    etapa = null;
+    const e = await retomar();
+    if (resultado === "convertida") resolver(e?.conta ? `Conta criada: ${e.conta.email}. Seu espaço agora entra de qualquer lugar.` : "Google ligado à sua conta.");
+    else if (!e?.escolha) resolver("Esse Google já tem conta. Abra o menu e entre nela.");
+  }
+
   const forms: Record<string, (form: Formulario) => Promise<void>> = {
+    "conta-email": (form) => trabalhar(async () => {
+      const email = campo(form, "email").trim();
+      const pedirCodigo = deps.api().codigo;
+      if (!pedirCodigo) return mudar({ tipo: "cadastro", erro: null });
+      await comErro(async () => {
+        const r = await pedirCodigo(email);
+        mudar({ tipo: "codigo", email: r.email, restantes: null, vencido: false, reenviado: false, naoEnviado: !r.enviado });
+      }, (erro) => mudar({ tipo: "email", erro }));
+    }),
     "conta-cadastro": (form) => trabalhar(async () => {
       const email = campo(form, "email").trim();
       if (senhaCurta(campo(form, "senha"))) return mudar({ tipo: "cadastro", erro: SENHA_CURTA });
@@ -608,7 +688,7 @@ export function criarContaNoChat(deps: DepsConta) {
       // O estado pode chegar antes da frota (boot): o cartão pendente se liga à conversa do Nod quando ela existir.
       if ((etapa || resolvidas.length) && !conversaId) conversaId = deps.conversaDoNod()?.conversaId ?? deps.conversaDaTela();
       if (id !== conversaId) return "";
-      return htmlBlocoConta({ etapa, ocupado, resolvidas, google: deps.google(), agora: deps.agora(), equipe: deps.equipe?.() ?? null });
+      return htmlBlocoConta({ etapa, ocupado, resolvidas, google: deps.google(), agora: deps.agora(), equipe: deps.equipe?.() ?? null, texto: (deps.texto?.() ?? false) && !!deps.api().codigo });
     },
     abrir,
     abrirPeloChat,

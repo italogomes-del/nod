@@ -5,7 +5,7 @@ import type { MotivoFimLigacao } from "../../../contracts/voz.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { disponibilidadeLigacao, encerrarLigacao, ligacaoViva, ligar, type ContextoLigacao, type SaidaLigar } from "../../../use-cases/ligacoes.ts";
-import { concluirOnboarding, criarBotDoOnboarding, criarRotinaDoOnboarding, definirEtapaOnboarding, estadoOnboarding, garantirNod } from "../../../use-cases/onboarding.ts";
+import { anotarRespostasDeTexto, concluirOnboarding, criarBotDoOnboarding, criarRotinaDoOnboarding, definirEtapaOnboarding, estadoOnboarding, garantirNod } from "../../../use-cases/onboarding.ts";
 import type { CasoDeUso } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
@@ -21,6 +21,8 @@ export type DepsRotasOnboarding = DepsRotas & {
   liberar(ligacaoId: string): void;
   encerrarViva(ligacaoId: string, motivo: MotivoFimLigacao): Promise<void>;
   fusoPadrao: string;
+  /** NOD_ONBOARDING_TEXTO=1 (ADA-242): 'configurando' aceita `respostas` {apelido, objetivo} da conversa por texto. */
+  onboardingTexto?: boolean;
 };
 
 const consentimento: CasoDeUso<Record<string, never>, number> = async (deps) => ({ data: (await deps.repos.ligacoes.consentimento()).versao ?? 0 });
@@ -84,6 +86,11 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
           return;
         }
         const linha = await executar(escopo, definirEtapaOnboarding, { etapa: b.etapa });
+        // ADA-242: as duas respostas da conversa por texto vêm junto da etapa (mesma ação, sem id novo no chat).
+        if (d.onboardingTexto && b.etapa === "configurando" && b.respostas && typeof b.respostas === "object") {
+          const r = b.respostas as { apelido?: unknown; objetivo?: unknown };
+          await executar(escopo, anotarRespostasDeTexto, { apelido: r.apelido, objetivo: r.objetivo });
+        }
         if (b.etapa === "configurando" && b.semVoz === true && linha.guiaId) {
           const viva = await vivaDaGuia(escopo, linha.guiaId);
           if (viva) {

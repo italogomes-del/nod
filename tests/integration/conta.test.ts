@@ -925,6 +925,119 @@ describeIntegracao("conta (NOD-345): provisório, cadastro, escolha, recuperaç�
       expect((await m.s.estado(q)).conta).toBeNull();
     });
   });
+  // ------------------------------------------------------------------- ADA-242 (ADR-157): conta sem senha e Google no app
+  it("ADA-242: código por e-mail sem senha cria a conta com a identidade `email` (sem senha, sem Google)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx);
+      const q = await provisorio(m);
+      const email = emailNovo();
+      expect(await m.s.pedirCodigo(q, { email })).toEqual({ enviado: true, email });
+      expect((await m.s.estado(q)).verificando).toEqual({ email });
+      // Reenviar segue sem senha.
+      await m.s.reenviar(q);
+      expect(await m.s.verificar(q, { codigo: codigoDoEmail(m) })).toEqual({ resultado: "convertida", email });
+      expect((await m.s.estado(q)).conta).toEqual({ email, senha: false, google: false });
+      const conta = await repoContas.contaPorEmail(trx, email);
+      const ids = await trx<{ tipo: string; senha_hash: string | null }[]>`select tipo, senha_hash from identidades_conta where conta_id = ${conta!.id}`;
+      expect(ids).toEqual([{ tipo: "email", senha_hash: null }]);
+    });
+  });
+
+  it("ADA-242: código sem senha para e-mail com conta abre a escolha e não cria identidade nova; e-mail inválido é recusado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx);
+      const dono = await comConta(m);
+      const conta = await repoContas.contaPorEmail(trx, dono.email);
+      const antes = await trx<{ tipo: string }[]>`select tipo from identidades_conta where conta_id = ${conta!.id} order by tipo`;
+      const q = await provisorio(m, "Visitante");
+      expect(await m.s.pedirCodigo(q, { email: dono.email })).toEqual({ enviado: true, email: dono.email });
+      expect(await m.s.verificar(q, { codigo: codigoDoEmail(m) })).toEqual({ resultado: "escolher", email: dono.email });
+      expect(await trx<{ tipo: string }[]>`select tipo from identidades_conta where conta_id = ${conta!.id} order by tipo`).toEqual(antes);
+      await expect(m.s.pedirCodigo(q, { email: "nao-e-email" })).rejects.toMatchObject({ codigo: "entrada_invalida" });
+      // Já convertido: não pede código de novo.
+      await expect(m.s.pedirCodigo(dono, { email: emailNovo() })).rejects.toMatchObject({ codigo: "estado_invalido" });
+    });
+  });
+
+  it("ADA-242: código sem senha respeita os limites do cadastro (o 6º pedido do mesmo e-mail é barrado e não manda e-mail)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx);
+      const q = await provisorio(m);
+      const email = emailNovo();
+      for (let i = 0; i < 5; i++) await m.s.pedirCodigo(q, { email });
+      const enviados = m.caixa.mensagens.length;
+      await expect(m.s.pedirCodigo(q, { email })).rejects.toMatchObject({ codigo: "limite_atingido" });
+      expect(m.caixa.mensagens).toHaveLength(enviados);
+    });
+  });
+
+  it("ADA-242: pessoa de antes das contas continua indo para o Google pelo código sem senha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const email = emailNovo();
+      const repo = { ...repoContas, existePessoaLegada: (async (c: Tx, e: string) => (e === email ? true : repoContas.existePessoaLegada(c, e))) as typeof repoContas.existePessoaLegada };
+      const m = mundo(trx, { repo });
+      const q = await provisorio(m, "Visitante");
+      await m.s.pedirCodigo(q, { email });
+      expect(await m.s.verificar(q, { codigo: codigoDoEmail(m) })).toEqual({ resultado: "pelo_google", email });
+      expect(await repoContas.contaPorEmail(trx, email)).toBeNull();
+    });
+  });
+
+  it("ADA-242: Google no app só liga a conta quando o processo principal prova; sem a prova o código morre", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx);
+      const q = await provisorio(m);
+      const g = { iss: "https://accounts.google.com", sub: `sub-${randomBytes(4).toString("hex")}`, email: emailNovo(), autoridade: true };
+      const anon: Quem = { escopo: null, sid: null, ip: ip(), aparelho: "Windows · nod" };
+      // Guardar não liga nada.
+      const roubado = await m.s.guardarGoogleApp({ escopo: q.escopo!, sid: q.sid!, desafio: APP.desafio }, g);
+      expect((await m.s.estado(q)).conta).toBeNull();
+      // Quem só leu o código (sem a prova certa) não troca, e o código não serve mais nem com a prova.
+      expect(await m.s.trocarGoogleApp(anon, { codigo: roubado, prova: segredoDeTroca().prova })).toBeNull();
+      expect(await m.s.trocarGoogleApp(anon, { codigo: roubado, prova: APP.prova })).toBeNull();
+      expect(await m.s.trocarGoogleApp(anon, { codigo: "x".repeat(10), prova: APP.prova })).toBeNull();
+      expect((await m.s.estado(q)).conta).toBeNull();
+      // O app de verdade: prova certa → converte esta pessoa.
+      const codigo = await m.s.guardarGoogleApp({ escopo: q.escopo!, sid: q.sid!, desafio: APP.desafio }, g);
+      expect(await m.s.trocarGoogleApp(anon, { codigo, prova: APP.prova })).toEqual({ resultado: "convertida" });
+      expect((await m.s.estado(q)).conta).toEqual({ email: g.email, senha: false, google: true });
+      expect(await m.s.trocarGoogleApp(anon, { codigo, prova: APP.prova })).toBeNull();
+      // Outro app (com o seu provisório) e o mesmo Google: abre a escolha de sempre (importar/entrar), como na web.
+      const outro = await provisorio(m, "Outro app");
+      const c2 = await m.s.guardarGoogleApp({ escopo: outro.escopo!, sid: outro.sid!, desafio: APP.desafio }, g);
+      expect(await m.s.trocarGoogleApp(anon, { codigo: c2, prova: APP.prova })).toEqual({ resultado: "escolher" });
+      expect((await m.s.estado(outro)).escolha).toMatchObject({ email: g.email });
+    });
+  });
+
+  it("ADA-242: Google no app com a sessão que pediu já morta não liga nada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx);
+      const q = await provisorio(m);
+      const g = { iss: "https://accounts.google.com", sub: `sub-${randomBytes(4).toString("hex")}`, email: emailNovo(), autoridade: true };
+      const codigo = await m.s.guardarGoogleApp({ escopo: q.escopo!, sid: q.sid!, desafio: APP.desafio }, g);
+      await trx`update sessoes set revogada_em = now() where id = ${q.sid!}`;
+      expect(await m.s.trocarGoogleApp({ escopo: null, sid: null, ip: ip(), aparelho: "x" }, { codigo, prova: APP.prova })).toBeNull();
+      expect(await repoContas.contaPorGoogle(trx, g.iss, g.sub)).toBeNull();
+    });
+  });
+
+  // Regression: QA-691 — o teto de trocas do Google no app por IP não tinha teste (mutante sem o limite passava verde).
+  // Found by /qa on 2026-11-08
+  it("ADA-242: limite: a 31ª troca do Google no app do mesmo IP é barrada mesmo com código e prova certos; de outro IP vale", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx);
+      const q = await provisorio(m);
+      const g = { iss: "https://accounts.google.com", sub: `sub-${randomBytes(4).toString("hex")}`, email: emailNovo(), autoridade: true };
+      const atacante = ip();
+      const de = (i: string): Quem => ({ escopo: null, sid: null, ip: i, aparelho: "x" });
+      for (let i = 0; i < 30; i++) expect(await m.s.trocarGoogleApp(de(atacante), { codigo: randomBytes(24).toString("base64url"), prova: APP.prova })).toBeNull();
+      const codigo = await m.s.guardarGoogleApp({ escopo: q.escopo!, sid: q.sid!, desafio: APP.desafio }, g);
+      await expect(m.s.trocarGoogleApp(de(atacante), { codigo, prova: APP.prova })).rejects.toMatchObject({ codigo: "limite_atingido" });
+      // Barrado antes de gastar o código: o app de verdade, de outro IP, ainda troca.
+      expect(await m.s.trocarGoogleApp(de(ip()), { codigo, prova: APP.prova })).toEqual({ resultado: "convertida" });
+    });
+  });
 });
 
 function tokenDoEmail(m: Mundo): string {

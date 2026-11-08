@@ -94,4 +94,4 @@ export type EstadoOnboarding = {
 };
 
 /** POST onboarding/etapa. `semVoz` só com 'configurando' (o "Configurar sem voz": encerra a ligação como recusada). */
-export type PedidoEtapaOnboarding = { etapa: Exclude<EtapaOnboarding, "concluido">; semVoz?: boolean };
+export type PedidoEtapaOnboarding = { etapa: Exclude<EtapaOnboarding, "concluido">; semVoz?: boolean; /** ADA-242: as duas respostas da conversa por texto (só com NOD_ONBOARDING_TEXTO). */ respostas?: { apelido?: string; objetivo?: string } };

@@ -11,9 +11,9 @@ import { data, ms, msOuNull } from "./conversao.ts";
 
 export type OrigemSessao = "web" | "maquina";
 export type SessaoDto = { id: string; origem: OrigemSessao; aparelho: string; criadaEm: number; ultimoUsoEm: number; revogadaEm: number | null };
-export type FinalidadeGuardada = "verificacao" | "recuperacao" | "troca_app" | "troca_email" | "reautenticacao";
+export type FinalidadeGuardada = "verificacao" | "recuperacao" | "troca_app" | "troca_email" | "reautenticacao" | "google_app";
 export type CodigoAberto = { id: string; chave: string; tentativas: number; dados: Record<string, unknown>; expiraEm: number };
-export type IdentidadeNova = { tipo: "senha"; senhaHash: string } | { tipo: "google"; iss: string; sub: string };
+export type IdentidadeNova = { tipo: "senha"; senhaHash: string } | { tipo: "google"; iss: string; sub: string } | { tipo: "email" };
 export type EntradaPendente = {
   id: string;
   sessaoId: string;
@@ -226,6 +226,8 @@ export async function gravarIdentidade(conn: Conn, contaId: string, i: Identidad
   const linhas =
     i.tipo === "senha"
       ? await conn`insert into identidades_conta (conta_id, tipo, senha_hash) values (${contaId}, 'senha', ${i.senhaHash}) on conflict do nothing returning 1`
+      : i.tipo === "email"
+      ? await conn`insert into identidades_conta (conta_id, tipo) values (${contaId}, 'email') on conflict do nothing returning 1`
       : await conn`insert into identidades_conta (conta_id, tipo, google_iss, google_sub) values (${contaId}, 'google', ${i.iss}, ${i.sub}) on conflict do nothing returning 1`;
   return linhas.length > 0;
 }

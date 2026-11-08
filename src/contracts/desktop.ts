@@ -2,7 +2,6 @@ import type { EstadoIa, ResultadoColarCodigo } from "./estado-ia.ts";
 import type { CausaDoMac, CausaInventario, CausaSemIa } from "./inventario.ts";
 import type { PonteContas } from "./contas-desktop.ts";
 import type { PonteMidia } from "./midia-desktop.ts";
-
 /**
  * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela (desktop/preload-web.ts)
  * expõe como `window.nodDesktop`. Só tipos e `as const` (EMENDA 26): a web importa com `import type`; o processo
@@ -91,7 +90,7 @@ export type PonteIas = {
 // ADR-101: as várias contas ficam em contas-desktop.ts (o teto de 200 linhas por contrato).
 export type { ContaNaTela, ContasNaTela, DetalheDaConta, DetalhesDasContas, PonteContas } from "./contas-desktop.ts";
 
-export type NodDesktop = import("./desktop-barra.ts").PonteBarraDesktop & { // NOD-119: definirBarra, definirDecisaoBarra
+export type NodDesktop = import("./desktop-barra.ts").PonteBarraDesktop & import("./desktop-conta-app.ts").PonteContaNoApp & { // NOD-119: definirBarra, definirDecisaoBarra
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
   avisar?(aviso: AvisoDesktop): Promise<boolean>;
   /** O número no ícone do Dock: pedidos abertos (0 apaga). */
@@ -191,6 +190,7 @@ export const CANAIS_DESKTOP = {
   contasDetalhes: "nod:contas-detalhes",
   trocarConta: "nod:trocar-conta", // NOD-345 (ADR-124): a troca de espaço depois de entrar numa conta pela janela do app.
   desafioConta: "nod:desafio-conta",
+  googleAbrir: "nod:google-abrir", googleIr: "nod:google-ir", googleCancelar: "nod:google-cancelar", esteComputadorJaViu: "nod:este-computador-ja-viu", esteComputadorMarcar: "nod:este-computador-marcar", // ADA-242
   souDaEquipe: "nod:sou-da-equipe", // NOD-406: a equipe sai do espaço provisório e volta à tela de conexão de antes.
   vmTentarAgora: "nod:vm-tentar-agora", // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
 } as const;

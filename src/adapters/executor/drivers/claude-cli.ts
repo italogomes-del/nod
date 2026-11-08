@@ -747,6 +747,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 await Promise.all(pendentes);
                 const exitCode = fim.erroSpawn ? null : fim.exitCode;
                 const signal = fim.erroSpawn ? null : fim.signal;
+                // ADA-242 (plano do #691, passo 5): o motivo do spawn que não aconteceu (ENOENT, EACCES) fica só no log da
+                // máquina; a conversa recebe a frase de lancamento_falhou ("neste computador"), nunca o erro do sistema.
+                if (fim.erroSpawn) log("aviso", "claude_cli_nao_abriu", { turno_id: plano.turnoId, codigo: (fim.erroSpawn as NodeJS.ErrnoException).code ?? null });
                 const classificado = classificarSessao({ eventos, exitCode, signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido(), driver: "claude-cli", rodadasJaFaladas: rodadasFaladas, falaDoMeio: meio });
                 // NOD-264 (C20): sem result, o log da máquina guarda a causa e o fim do stderr (redigido); a ponte só leva a causa.
                 if (classificado.desfecho === "interrompido") log("aviso", "turno_sem_result", { turno_id: plano.turnoId, causa: classificado.causa ?? null, stderr: fimDoStderr(fim.stderr) });

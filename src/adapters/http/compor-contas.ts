@@ -32,6 +32,8 @@ export type ContasMontadas = {
   caixa: CaixaLocal | null;
   rotas: Rota[];
   bootstrap: boolean;
+  /** NOD_ONBOARDING_TEXTO=1 (ADA-242, ADR-157): onboarding por texto, conta por código e Google no app. */
+  onboardingTexto: boolean;
   google: ReturnType<typeof contaNoGoogle> | null;
   /** A sessão "maquina" do cookie que a ponte põe no app (`/api/maquina/sessao`): uma por chave, reaproveitada enquanto viva. */
   sessaoDaMaquina(escopo: Escopo, chaveId: string, nome: string | null): Promise<string>;
@@ -92,7 +94,9 @@ export function comporContas(p: { db: Db; env: Env; dentro: DentroDeTx; agora: (
     env.NOD_MINHA_CONTA === "1"
       ? servicoMinhaConta({ transacao: (fn) => p.db.begin(fn) as never, segredo, enviador, urlBase, agora: p.agora, repo: repoContas, mc: repoMinhaConta, perfil: perfilRepo, purgaLigada: env.NOD_PURGA_CONTA === "1", aoEncerrarSessoes: (escopos) => escopos.forEach((e) => guarda.esquecer?.(e)) })
       : null;
-  const rotas = rotasConta({ servico, guarda, segredo, seguro, bootstrap, caixa, google: googleLigado, agora: p.agora, minhaConta });
+  // ADA-242 (ADR-157): conta sem senha e Google no app. Desligada, o onboarding e a conta seguem os de antes.
+  const onboardingTexto = env.NOD_ONBOARDING_TEXTO === "1";
+  const rotas = rotasConta({ servico, guarda, segredo, seguro, bootstrap, caixa, google: googleLigado, agora: p.agora, minhaConta, onboardingTexto });
   if (caixa) rotas.push(rotaCaixaDev(caixa));
 
   const daMaquina = new Map<string, string>();
@@ -103,7 +107,8 @@ export function comporContas(p: { db: Db; env: Env; dentro: DentroDeTx; agora: (
     caixa,
     rotas,
     bootstrap,
-    google: googleLigado ? contaNoGoogle({ servico, guarda, segredo, seguro, agora: p.agora }) : null,
+    onboardingTexto,
+    google: googleLigado ? contaNoGoogle({ servico, guarda, segredo, seguro, agora: p.agora, onboardingTexto }) : null,
     async sessaoDaMaquina(escopo, chaveId, nome) {
       const k = `${escopo.tenantId}:${escopo.pessoaId}:${chaveId}`;
       const sid = daMaquina.get(k);

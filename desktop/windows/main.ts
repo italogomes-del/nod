@@ -7,7 +7,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arquivoDaConexao, carregarConexao, guardarConexao, pastaDoMotor, type ConexaoMotor } from "../../motor/conexao.ts";
 import { criarAtualizacaoDoApp, linhaDaAtualizacao, servidorDeAtualizacao, TEXTOS_ATUALIZACAO, type AtualizacaoDoApp } from "../atualizacao.ts";
-import { pedirProvisorio, servidorOfereceProvisorio, verificadorNovo, verificadorValido } from "../conta-provisoria.ts";
+import { pedirProvisorio, segredoDeTroca, servidorOfereceProvisorio, trocarChaveDoApp, verificadorNovo, verificadorValido } from "../conta-provisoria.ts";
+import { esteComputadorEm } from "../este-computador.ts";
+import { criarGoogleNoApp } from "../google-conta.ts";
 import { lerIaDesktop } from "../ia-mac.ts";
 import { abreNoNavegador } from "../links-externos.ts";
 import { CANAIS_DESKTOP } from "../../src/contracts/desktop.ts";
@@ -282,6 +284,41 @@ else {
       if (!lida) throw new Error("entrada_invalida");
       return abrirInstalacao(lida, (u) => shell.openExternal(u));
     });
+    // ADA-242 (ADR-157 §3): o Google para conta dentro do app, como no Mac. A prova não sai deste processo; a página só
+    // vê o desafio. `entrou` (raro: o app sempre tem um provisório) troca a conexão pela do destino e reabre.
+    const troca = segredoDeTroca();
+    const daJanela = (e: IpcMainInvokeEvent) => daJanelaWeb(e, janela, conexao ? new URL(conexao.url).origin : null);
+    const trocarConexao = async (chave: string): Promise<void> => {
+      if (!conexao) return;
+      conexao = { url: conexao.url, chave };
+      await guardarConexao(pastaMotor(), conexao);
+      await marcarEquipeDoApp();
+      await abrir();
+    };
+    const google = criarGoogleNoApp({
+      servidor: () => conexao?.url ?? null,
+      prova: troca.prova,
+      abrirExterno: (u) => shell.openExternal(u),
+      aoEntrar: (chave) => trocarConexao(chave),
+      registrar: (evento, dados) => registrar(evento, dados),
+    });
+    ipcMain.handle(CANAIS_DESKTOP.desafioConta, (e) => { if (!daJanela(e)) throw new Error("entrada_invalida"); return troca.desafio; });
+    // A troca de espaço depois de entrar numa conta que já existe pela janela (o "escolher" do Google/e-mail), como no Mac.
+    ipcMain.handle(CANAIS_DESKTOP.trocarConta, async (e, codigo: unknown) => { if (!daJanela(e)) throw new Error("entrada_invalida");
+      if (!conexao) return false;
+      const chave = await trocarChaveDoApp({ servidor: conexao.url, codigo, prova: troca.prova });
+      if (!chave) return false;
+      await trocarConexao(chave);
+      return true;
+    });
+    ipcMain.handle(CANAIS_DESKTOP.googleAbrir, (e) => { if (!daJanela(e)) throw new Error("entrada_invalida"); return google.abrir(); });
+    ipcMain.handle(CANAIS_DESKTOP.googleIr, (e, url: unknown) => { if (!daJanela(e)) throw new Error("entrada_invalida"); return google.ir(url); });
+    ipcMain.handle(CANAIS_DESKTOP.googleCancelar, (e) => { if (daJanela(e)) google.cancelar(); });
+    // ADA-242 (ADR-157 §4): o "já vi" da tela Este computador, nesta máquina. Mora com a conexão (%APPDATA%\nod-motor),
+    // não no userData (%APPDATA%\nod, que a reinstalação limpa do aceite 6 não apaga).
+    const esteComputador = esteComputadorEm(pastaMotor());
+    ipcMain.handle(CANAIS_DESKTOP.esteComputadorJaViu, (e) => (daJanela(e) ? esteComputador.jaViu() : false));
+    ipcMain.handle(CANAIS_DESKTOP.esteComputadorMarcar, async (e) => { if (daJanela(e)) await esteComputador.marcar(); });
     bandeja = new Tray(icone().resize({ width: 16, height: 16 }));
     bandeja.on("click", () => { if (janela && !janela.isDestroyed()) janela.show(); else void abrir(); });
     atualizacao = montarAtualizacao();

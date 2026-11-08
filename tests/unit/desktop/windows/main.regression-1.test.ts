@@ -29,13 +29,40 @@ describe("QA #678: o IPC só atende a tela de conexão", () => {
     const guardados = main.match(/ipcMain\.handle\("nodwin:\w+", \(e\) => \{?\s*(?:\(|if \()daTelaDeSetup\(e\)/g) ?? [];
     // 5/11: os canais da janela web (`nod:ia-*`) passam pela guarda da janela (login-ia-windows.ts `daJanelaWeb`).
     const daJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.ia\w+, \(e, ia: unknown\) => \{\s*const lida = iaDaJanela\(e, ia\);\s*if \(!lida\) throw new Error\("entrada_invalida"\);/g) ?? [];
+    // ADA-242: o Google no app e o "já vi" da janela web passam pela mesma guarda (`daJanela`, daJanelaWeb).
+    const contaDaJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.(?:desafioConta|trocarConta|google\w+|esteComputador\w+), (?:async )?\(e(?:, (?:url|codigo): unknown)?\) => (?:\{ if \(!?daJanela\(e\)\)|\(daJanela\(e\) \?)/g) ?? [];
+    expect(contaDaJanela).toHaveLength(7);
+    expect(main).toMatch(/const daJanela = \(e: IpcMainInvokeEvent\) => daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\);/);
     expect(handles).toBeGreaterThanOrEqual(7);
-    expect(guardados.length + daJanela.length).toBe(handles);
+    expect(guardados.length + daJanela.length + contaDaJanela.length).toBe(handles);
     expect(daJanela).toHaveLength(2);
     expect(main).toMatch(/const iaDaJanela = \(e: IpcMainInvokeEvent, ia: unknown\) => \(daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\) \? lerIaDesktop\(ia\) : null\);/);
     expect(main).toMatch(/preload: join\(dir, "preload-web-windows\.cjs"\)/);
     expect(main).toMatch(/const daTelaDeSetup = \(e: IpcMainInvokeEvent\) => daTelaDeSetupPura\(e, setup, setupUrl\);/);
     expect(main).toContain('setup.webContents.on("will-navigate", (e, url) => { if (url !== setupUrl) e.preventDefault(); });');
+  });
+});
+
+describe("ADA-242: a troca de conta pela janela web do Windows (escolher → Levar para esta conta)", () => {
+  // Sem `trocarConta`, `cabecalhosDoApp` lança AppDesatualizado e a conta do Google que já existe não termina no Windows.
+  it("a ponte expõe trocarConta e o main troca o código pela chave com a prova do mesmo segredo do desafio", () => {
+    const preload = readFileSync(new URL("../../../../desktop/windows/preload-web-windows.ts", import.meta.url), "utf8");
+    expect(preload).toMatch(/trocarConta: \(codigo: string\) => ipcRenderer\.invoke\(CANAIS_DESKTOP\.trocarConta, codigo\)/);
+    expect(main).toMatch(/ipcMain\.handle\(CANAIS_DESKTOP\.trocarConta, async \(e, codigo: unknown\) => \{ if \(!daJanela\(e\)\) throw new Error\("entrada_invalida"\);/);
+    expect(main).toMatch(/trocarChaveDoApp\(\{ servidor: conexao\.url, codigo, prova: troca\.prova \}\)/);
+    // A conexão nova é a mesma do Google no app: grava, marca a equipe e reabre.
+    expect(main).toMatch(/aoEntrar: \(chave\) => trocarConexao\(chave\)/);
+  });
+});
+
+// Regression: QA-691 — no Windows o "já vi Este computador" ia para app.getPath("userData") (%APPDATA%\nod, que o
+// electron-builder não apaga e o aceite 6 não manda apagar): a reinstalação limpa (%LOCALAPPDATA%\nod e
+// %APPDATA%\nod-motor apagados) não mostrava a tela de novo. Mora com a conexão, em %APPDATA%\nod-motor.
+// Found by /qa on 2026-11-08
+describe("QA #691: o 'já vi' da tela Este computador mora com a conexão (aceite 6)", () => {
+  it("o main do Windows guarda o 'já vi' na pasta do motor, não no userData do Electron", () => {
+    expect(main).toMatch(/const esteComputador = esteComputadorEm\(pastaMotor\(\)\);/);
+    expect(main).not.toMatch(/esteComputadorEm\(app\.getPath\("userData"\)\)/);
   });
 });
 

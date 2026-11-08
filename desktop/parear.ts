@@ -1,6 +1,6 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { randomBytes } from "node:crypto";
 import { desafioDe, PRAZO_PAREAMENTO_MS } from "../src/services/pareamento-maquina.ts";
+import { abrirLoopback, paginaDoLoopback } from "./loopback.ts";
 
 /**
  * Pareamento pelo navegador (ADR-069, RFC 8252 "loopback" + PKCE da RFC 7636): o app abre uma porta
@@ -25,10 +25,6 @@ export function urlDePareamento(servidor: string, p: PedidoNoNavegador): string 
   return u.toString();
 }
 
-const iguais = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-const pagina = (titulo: string, texto: string) =>
-  `<!doctype html><meta charset="utf-8"><title>nod</title><body style="font:16px -apple-system,sans-serif;max-width:420px;margin:80px auto;color:#23312a"><h1 style="font-size:24px">${titulo}</h1><p>${texto}</p></body>`;
-
 export async function parearPeloNavegador(o: {
   servidor: string;
   nome: string;
@@ -37,28 +33,17 @@ export async function parearPeloNavegador(o: {
   prazoMs?: number;
 }): Promise<string> {
   const verificador = randomBytes(32).toString("base64url");
-  const estado = randomBytes(24).toString("base64url");
-  let servidorLocal: Server | null = null;
-  const codigo = await new Promise<string>((resolver, rejeitar) => {
-    const srv = createServer((req, res) => {
-      const u = new URL(req.url ?? "/", "http://127.0.0.1");
-      const c = u.searchParams.get("codigo") ?? "";
-      if (req.method !== "GET" || u.pathname !== "/retorno" || !iguais(u.searchParams.get("estado") ?? "", estado) || !c) {
-        res.writeHead(400, { "content-type": "text/html; charset=utf-8" }).end(pagina("Pedido inválido", "Volte ao app do nod e clique em Entrar com Google de novo."));
-        return;
-      }
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }).end(pagina("Pronto", "Este Mac está conectado ao nod. Pode fechar esta aba e voltar ao app."));
-      resolver(c);
+  let codigo: string;
+  try {
+    const l = await abrirLoopback({
+      prazoMs: o.prazoMs ?? PRAZO_PAREAMENTO_MS,
+      paginaOk: paginaDoLoopback("Pronto", "Este Mac está conectado ao nod. Pode fechar esta aba e voltar ao app."),
+      paginaErro: paginaDoLoopback("Pedido inválido", "Volte ao app do nod e clique em Entrar com Google de novo."),
     });
-    servidorLocal = srv;
-    const limite = setTimeout(() => rejeitar(new FalhaPareamento("sem_resposta")), o.prazoMs ?? PRAZO_PAREAMENTO_MS);
-    limite.unref();
-    srv.on("error", () => rejeitar(new FalhaPareamento("sem_resposta")));
-    srv.listen(0, "127.0.0.1", () => {
-      const porta = (srv.address() as { port: number }).port;
-      o.abrir(urlDePareamento(o.servidor, { porta, estado, desafio: desafioDe(verificador), nome: o.nome })).catch(() => rejeitar(new FalhaPareamento("sem_resposta")));
-    });
-  }).finally(() => { (servidorLocal as Server | null)?.close(); });
+    o.abrir(urlDePareamento(o.servidor, { porta: l.porta, estado: l.estado, desafio: desafioDe(verificador), nome: o.nome })).catch(() => l.fechar());
+    codigo = (await l.retorno).get("codigo") ?? "";
+  } catch { throw new FalhaPareamento("sem_resposta"); }
+  if (!codigo) throw new FalhaPareamento("sem_resposta");
 
   let r: Response;
   try {

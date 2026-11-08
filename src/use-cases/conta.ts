@@ -193,7 +193,7 @@ export function servicoConta(d: DepsConta) {
     return { contaId, destino: legada };
   }
 
-  return {
+  const api = {
     // ------------------------------------------------------------------------------------------ estado
     async estado(q: Quem): Promise<EstadoConta> {
       const { escopo, sid } = exigirSessao(q);
@@ -295,7 +295,26 @@ export function servicoConta(d: DepsConta) {
       return { enviado: await enviou(() => d.enviador.enviar(emailDeVerificacao(email, codigo))), email };
     },
 
-    /** Reenviar (#j2-4): código novo para o mesmo e-mail e senha; o anterior deixa de valer. */
+    /**
+     * ADA-242 (ADR-157): conta sem senha. Só o e-mail → código por e-mail. Mesmos limites e mesma resposta do cadastro
+     * (não diz se o e-mail já tem conta). O `verificar` decide: e-mail novo cria a conta (identidade `email`); e-mail
+     * com conta abre a escolha sem identidade nova (o código não dá senha).
+     */
+    async pedirCodigo(q: Quem, e: { email: unknown }): Promise<{ enviado: boolean; email: string }> {
+      const { escopo, sid } = exigirSessao(q);
+      const email = normalizarEmail(e.email);
+      if (!email) throw new ErroDeDominio("entrada_invalida", { cause: "email" });
+      if (!(await d.transacao((trx) => repo.ehProvisorio(trx, escopo)))) throw new ErroDeDominio("estado_invalido", { cause: "só o espaço provisório vira conta" });
+      if (d.antiAbuso && !(await limitar([["cadastro_ip_dia", q.ip, ANTIABUSO.cadastroPorIpDia, DIA_MS]], true))) throw limiteMsg("cadastro");
+      if (!(await limitar([["cadastro_ip", q.ip, LIMITES.cadastroPorIp], ["cadastro_email", email, LIMITES.cadastroPorEmail], ["cadastro_email_dia", email, LIMITES.cadastroPorEmailDia, 24 * HORA]]))) throw limiteMsg("cadastro");
+      const codigo = novoCodigo();
+      await d.transacao((trx) =>
+        repo.emitirCodigo(trx, { finalidade: "verificacao", chave: chaveVerificacao(sid), hash: hashDoCodigo(d.segredo, "verificacao", codigo, chaveVerificacao(sid)), expiraEm: d.agora() + CODIGO_VERIFICACAO_MS, dados: { email } }),
+      );
+      return { enviado: await enviou(() => d.enviador.enviar(emailDeVerificacao(email, codigo))), email };
+    },
+
+    /** Reenviar (#j2-4): código novo para o mesmo e-mail (e a mesma senha, quando houver); o anterior deixa de valer. */
     async reenviar(q: Quem): Promise<{ enviado: boolean; email: string }> {
       const { escopo, sid } = exigirSessao(q);
       // Já convertida: não há o que reenviar (o código usado não vira outro).
@@ -304,11 +323,11 @@ export function servicoConta(d: DepsConta) {
         const [l] = await trx<{ dados: { email?: string; senhaHash?: string } }[]>`select dados from codigos_conta where finalidade = 'verificacao' and chave = ${chaveVerificacao(sid)} order by criado_em desc limit 1`;
         return l?.dados ?? null;
       });
-      if (!aberto?.email || !aberto.senhaHash) throw new ErroDeDominio("estado_invalido", { cause: "nada a reenviar" });
+      if (!aberto?.email) throw new ErroDeDominio("estado_invalido", { cause: "nada a reenviar" });
       if (!(await limitar([["cadastro_ip", q.ip, LIMITES.cadastroPorIp], ["cadastro_email", aberto.email, LIMITES.cadastroPorEmail], ["cadastro_email_dia", aberto.email, LIMITES.cadastroPorEmailDia, 24 * HORA]]))) throw limiteMsg("reenviar");
       const codigo = novoCodigo();
       await d.transacao((trx) =>
-        repo.emitirCodigo(trx, { finalidade: "verificacao", chave: chaveVerificacao(sid), hash: hashDoCodigo(d.segredo, "verificacao", codigo, chaveVerificacao(sid)), expiraEm: d.agora() + CODIGO_VERIFICACAO_MS, dados: { email: aberto.email, senhaHash: aberto.senhaHash } }),
+        repo.emitirCodigo(trx, { finalidade: "verificacao", chave: chaveVerificacao(sid), hash: hashDoCodigo(d.segredo, "verificacao", codigo, chaveVerificacao(sid)), expiraEm: d.agora() + CODIGO_VERIFICACAO_MS, dados: aberto.senhaHash ? { email: aberto.email, senhaHash: aberto.senhaHash } : { email: aberto.email } }),
       );
       return { enviado: await enviou(() => d.enviador.enviar(emailDeVerificacao(aberto.email as string, codigo))), email: aberto.email };
     },
@@ -335,7 +354,8 @@ export function servicoConta(d: DepsConta) {
         }
         await repo.consumirCodigo(trx, aberto.id);
         const email = String(aberto.dados.email);
-        const senhaHash = String(aberto.dados.senhaHash);
+        // ADA-242: o código pedido só com o e-mail (POST /conta/codigo) não traz senha.
+        const senhaHash = typeof aberto.dados.senhaHash === "string" ? aberto.dados.senhaHash : null;
         // Trava a instalação viva antes de conferir: uma importação do mesmo espaço (outra aba) faz fila e, depois dela,
         // o espaço já não é provisório. Sem a trava, o espaço iria para uma conta e seria convertido em outra.
         if (!((await repo.travarInstalacaoViva(trx, escopo)) && (await repo.ehProvisorio(trx, escopo)))) throw new ErroDeDominio("estado_invalido", { cause: "só o espaço provisório vira conta" });
@@ -351,12 +371,12 @@ export function servicoConta(d: DepsConta) {
           const contaId = await repo.criarConta(trx, email);
           if (!contaId) throw new ErroDeDominio("estado_invalido", { cause: "conta criada em paralelo" });
           if (!(await repo.ligarContaPessoa(trx, contaId, escopo))) throw new ErroDeDominio("estado_invalido", { cause: "pessoa já tem conta" });
-          await repo.gravarIdentidade(trx, contaId, { tipo: "senha", senhaHash });
-          log("info", "conta_criada", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId, forma: "senha" });
+          await repo.gravarIdentidade(trx, contaId, senhaHash ? { tipo: "senha", senhaHash } : { tipo: "email" });
+          log("info", "conta_criada", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId, forma: senhaHash ? "senha" : "email" });
           return { resultado: "convertida", email } as const;
         }
         // A posse do e-mail está provada: a senha nova vale para a conta só se ela ainda não tem senha.
-        await repo.abrirEntrada(trx, { sessaoId: sid, destino: existente.destino, contaId: existente.contaId, email, novaIdentidade: { tipo: "senha", senhaHash }, expiraEm: d.agora() + ENTRADA_PENDENTE_MS });
+        await repo.abrirEntrada(trx, { sessaoId: sid, destino: existente.destino, contaId: existente.contaId, email, novaIdentidade: senhaHash ? { tipo: "senha", senhaHash } : null, expiraEm: d.agora() + ENTRADA_PENDENTE_MS });
         return { resultado: "escolher", email } as const;
       });
     },
@@ -497,6 +517,40 @@ export function servicoConta(d: DepsConta) {
         if (!porGoogle) await repo.gravarIdentidade(trx, alvo.contaId, { tipo: "google", iss: g.iss, sub: g.sub });
         return { resultado: "entrou", ...(await trocarSessao(trx, q, alvo.destino)) } as const;
       });
+    },
+
+    /**
+     * ADA-242 (ADR-157 §3): a volta do Google pedida pelo APP. Não liga nada: guarda a identidade num código `google_app`
+     * de uso único, amarrado à sessão e ao desafio do processo principal. Devolve o código que vai ao loopback do app.
+     */
+    async guardarGoogleApp(b: { escopo: Escopo; sid: string; desafio: string }, g: { iss: string; sub: string; email: string; autoridade: boolean }): Promise<string> {
+      const token = novoToken();
+      await d.transacao((trx) =>
+        repo.emitirCodigo(trx, { finalidade: "google_app", chave: b.sid, hash: hashDoCodigo(d.segredo, "google_app", token), expiraEm: d.agora() + CODIGO_TROCA_APP_MS, dados: { ...b.escopo, desafio: b.desafio, iss: g.iss, sub: g.sub, email: g.email, autoridade: g.autoridade } }),
+      );
+      return token;
+    },
+
+    /**
+     * O processo principal do app troca o código do loopback com a prova (o segredo cujo SHA-256 foi no bilhete). Só aqui
+     * a identidade Google chega à conta (`voltaGoogle`, a mesma da web). Prova errada: o código já foi gasto e morre.
+     * `entrou` traz a chave de máquina do destino (o app reconecta com ela); os outros resultados mantêm a sessão.
+     */
+    async trocarGoogleApp(q: Quem, e: { codigo: unknown; prova: unknown }): Promise<{ resultado: "convertida" | "escolher" | "recusado" } | { resultado: "entrou"; chave: string } | null> {
+      if (typeof e.codigo !== "string" || e.codigo.length < 20 || e.codigo.length > 100) return null;
+      if (typeof e.prova !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(e.prova)) return null;
+      if (!(await limitar([["troca_app_ip", q.ip, LIMITES.trocaAppPorIp]]))) throw limiteMsg("troca google app");
+      const c = await d.transacao((trx) => repo.consumirCodigoPorHash(trx, "google_app", hashDoCodigo(d.segredo, "google_app", e.codigo as string)));
+      if (!c) return null;
+      const desafio = Buffer.from(String(c.dados.desafio ?? ""), "utf8");
+      const calculado = Buffer.from(createHash("sha256").update(e.prova).digest("base64url"), "utf8");
+      if (desafio.length !== calculado.length || !timingSafeEqual(desafio, calculado)) return null;
+      const escopo = { tenantId: String(c.dados.tenantId), pessoaId: String(c.dados.pessoaId) };
+      // A sessão que pediu ainda vive? (sair, sair das outras e redefinir a senha a matam.)
+      if (!(await d.transacao((trx) => repo.sessaoViva(trx, c.chave, escopo)))) return null;
+      const r = await api.voltaGoogle({ ...q, escopo, sid: c.chave, desafioApp: null }, { iss: String(c.dados.iss), sub: String(c.dados.sub), email: String(c.dados.email), autoridade: c.dados.autoridade === true });
+      if (r.resultado !== "entrou") return { resultado: r.resultado };
+      return { resultado: "entrou", chave: await d.emitirChaveMaquina(r.sessao.escopo, q.aparelho.slice(0, 60) || "Este computador") };
     },
 
     /**
@@ -685,6 +739,7 @@ export function servicoConta(d: DepsConta) {
       return { chave: await d.emitirChaveMaquina(escopo, q.aparelho.slice(0, 60) || "Este computador") };
     },
   };
+  return api;
 
   /**
    * Quem está num espaço provisório e entra numa conta por outro caminho (link de recuperação, pareamento) não perde o

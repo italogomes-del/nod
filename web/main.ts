@@ -199,6 +199,7 @@ import { pedirConsentimentoVoz } from "./telas/consentimento-voz.ts";
 import { anuncioDaLeitura, criarTocadorDeLeitura, TEXTO_FALHA_LEITURA, type LeituraAtual, type MotivoParada } from "./lib/ouvir.ts";
 import { criarControleDitado } from "./telas/ditado-controle.ts";
 import { ditadoNaPilula, juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
+import { nomeDoEmail } from "./telas/conversa-texto.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
 import { movimentoReduzido } from "./lib/movimento.ts";
 import { alvoDoQueEspera, levarAoAlvo, passoDoAtalho, type AlvoDoAtalho } from "./lib/levar-ao-alvo.ts";
@@ -849,6 +850,9 @@ function avisarDitado(f: Parameters<typeof textoDaFalha>[0]): void {
 const telaOnboarding = criarTelaOnboarding({
   api: () => api,
   iasMac: () => estado.iasMac,
+  // ADA-242: a jornada A (texto, sem ligação) só com NOD_ONBOARDING_TEXTO.
+  texto: () => contas?.onboardingTexto === true,
+  nomeSugerido: () => nomeDoEmail(quemEsta()?.email),
   dados: () => estado.onboarding,
   aberto: () => estado.onboardingAberto,
   hidratar: (o) => dispatch({ tipo: "hidratar-onboarding", onboarding: o }),
@@ -884,7 +888,7 @@ const telaOnboarding = criarTelaOnboarding({
  */
 /** O app não conseguiu trocar a chave de máquina: não recarrega com a conta nova na tela e o executor na antiga. */
 const FALHA_TROCA_APP = "O app não conseguiu trocar de conta. Feche e abra o nod para tentar de novo.";
-let contas: { google: boolean; bootstrap: boolean; minhaConta?: boolean } | null = null;
+let contas: { google: boolean; bootstrap: boolean; minhaConta?: boolean; onboardingTexto?: boolean } | null = null;
 /** NOD-406: o servidor entra pelo Google (modo "google" de /api/sessao/modo); lido junto com `contas`. */
 let loginGoogle = false;
 let contaAtual: EstadoContaDto | null = null;
@@ -898,8 +902,11 @@ const telaConta = criarContaNoChat({
   conversaDaTela: () => conversaDaTela(estado)?.conversa.id ?? null,
   irParaConversa: (conversaId, agenteId) => navegar({ tipo: "conversa", conversaId, agenteId }),
   aoMudar: () => render(),
-  // No app, o Google abre no navegador do sistema, sem a sessão do app: o Google para conta ainda não vale lá.
-  google: () => (contas?.google ?? false) && window.nodDesktop === undefined,
+  // No app, o Google abre no navegador do sistema, sem a sessão do app: só vale com o loopback do processo principal
+  // (ADA-242, NOD_ONBOARDING_TEXTO e a ponte googleConta); sem isso, fica só na web, como antes.
+  google: () => (contas?.google ?? false) && (window.nodDesktop === undefined || (contas?.onboardingTexto === true && !!window.nodDesktop.googleConta)),
+  texto: () => contas?.onboardingTexto === true,
+  googleNoApp: () => window.nodDesktop?.googleConta ?? null,
   // NOD-406: sem o Google para conta, a equipe ainda entra pelo Google de antes (o cookie da equipe troca o do provisório).
   // Só na web: no app, o Google abre no navegador do sistema, sem a sessão do app.
   equipe: () => linkEquipe(),
@@ -2943,6 +2950,8 @@ function render(): void {
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
+  // ADA-242 (aceite 6): quem já concluiu, numa máquina que não viu "Este computador", vê só essa tela (uma vez por sessão).
+  void telaOnboarding.verificarMaquina();
   const camadaOnboarding = telaOnboarding.camada();
   const devolverFoco = regiaoMudaria("onboarding", camadaOnboarding) ? guardarFocoDaCamada(document.getElementById("onboarding")) : null;
   regiao("onboarding", camadaOnboarding);
@@ -6751,7 +6760,8 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     const ia = form.dataset.ia;
     if (ehIa(ia)) await contasDoMac.adicionar(ia, String(new FormData(form).get("apelido") ?? ""));
   },
-  "onboarding-bot": async (form) => { await telaOnboarding.forms["onboarding-bot"]?.(form); },
+  // Todos os forms do onboarding (o card do bot e, com NOD_ONBOARDING_TEXTO, o nome, o objetivo escrito e o código do login).
+  ...Object.fromEntries(Object.entries(telaOnboarding.forms).map(([k, f]) => [k, async (form: HTMLFormElement) => { await f(form); }])),
   ...telaConta.forms,
   ...(telaMinhaConta.forms as Record<string, (form: HTMLFormElement) => Promise<void>>),
   "entrada-conta": (form) => entrarPelaTela(form),

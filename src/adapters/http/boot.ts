@@ -227,7 +227,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
     autorizarMaquina: app.autorizarMaquina,
     sessao: sessao.modo === "google" && app.contas ? { ...sessao, google: { ...sessao.google, ...(app.contas.google ? { conta: app.contas.google } : {}) } } : sessao,
-    ...(app.contas ? { contas: { guarda: app.contas.guarda, google: app.contas.google !== null, bootstrap: app.contas.bootstrap, minhaConta: !!app.contas.minhaConta, rotas: app.contas.rotas } } : {}),
+    ...(app.contas ? { contas: { guarda: app.contas.guarda, google: app.contas.google !== null, bootstrap: app.contas.bootstrap, minhaConta: !!app.contas.minhaConta, onboardingTexto: app.contas.onboardingTexto, rotas: app.contas.rotas } } : {}),
     verificarSaude,
     estadoSaude,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.

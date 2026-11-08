@@ -1491,6 +1491,7 @@ export function comporApp(o: OpcoesCompor): App {
       liberar: (id) => voz.liberar(id),
       encerrarViva: (id, motivo) => voz.encerrar(id, motivo),
       fusoPadrao: env.NOD_FUSO_PADRAO ?? "America/Sao_Paulo",
+      onboardingTexto: env.NOD_ONBOARDING_TEXTO === "1",
     }),
     ...rotasConcessoes({ dentro }),
     // NOD-398: a captura de tela só com NOD_CAPTURA_TELA=1 (dev, CI, efêmero); produção não liga e responde `indisponivel`.

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cunharBilhete, lerBilhete } from "../../../src/adapters/http/rotas/conta.ts";
+import { cunharBilhete, cunharBilheteApp, lerBilhete, lerBilheteApp } from "../../../src/adapters/http/rotas/conta.ts";
 import { listen } from "../../../src/adapters/http/server.ts";
 import { CLIENT_ID, claimsBoas, googleFalso, respostaComIdToken } from "../../helpers/google-falso.ts";
 
@@ -16,6 +16,7 @@ describe("Google para conta: servidor real, Google falso", () => {
   let claims: Record<string, unknown> = {};
   const semBilhete: { iss: string; sub: string }[] = [];
   const voltas: { bilhete: string; g: { iss: string; sub: string; email: string; autoridade: boolean } }[] = [];
+  const voltasApp: { bilhete: string; g: { iss: string; sub: string; email: string; autoridade: boolean } }[] = [];
   const google = googleFalso(() => respostaComIdToken(claims));
 
   beforeAll(async () => {
@@ -33,6 +34,13 @@ describe("Google para conta: servidor real, Google falso", () => {
           conta: {
             // O real exige o cookie de sessão do mesmo sid; aqui o "navegador dono" é quem manda `dono=1`.
             bilheteDoNavegador: (b, req) => lerBilhete(SEGREDO, b, Date.now()) !== null && (req.headers.cookie ?? "").includes("dono=1"),
+            // ADA-242: o bilhete do app vale sem cookie (o navegador do sistema não tem a sessão do app).
+            bilheteApp: (b) => lerBilheteApp(SEGREDO, b, Date.now()) !== null,
+            async aoVoltarApp(bilhete, g) {
+              voltasApp.push({ bilhete, g });
+              const b = lerBilheteApp(SEGREDO, bilhete, Date.now());
+              return b ? `http://127.0.0.1:${b.porta}/retorno?estado=${b.estado}&codigo=codigo-guardado` : null;
+            },
             async aoVoltar(bilhete, g) {
               voltas.push({ bilhete, g });
               return { setCookie: null, pagina: "<p>volte ao app</p>" };
@@ -124,5 +132,28 @@ describe("Google para conta: servidor real, Google falso", () => {
     const r = await fetch(`${base}/api/sessao/google/callback?code=c&state=${encodeURIComponent(state)}`, { redirect: "manual", headers: { cookie } });
     expect(r.headers.getSetCookie().some((c) => c.startsWith("nod_sessao="))).toBe(false);
     expect(voltas.length).toBe(antes);
+  });
+
+  it("ADA-242: bilhete do app abre sem cookie e a volta vai ao loopback do app (302), sem passar por aoVoltar", async () => {
+    const desafio = "d".repeat(43);
+    const bilhete = cunharBilheteApp(SEGREDO, { escopo: ANA, sid: "sid-app", t: Date.now(), porta: 50_123, estado: "estado-do-loopback-01", desafio });
+    const r0 = await fetch(`${base}/api/sessao/google?conta-app=${encodeURIComponent(bilhete)}`, { redirect: "manual" });
+    expect(r0.status).toBe(302);
+    const loc = new URL(r0.headers.get("location")!);
+    const cookie = (r0.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const antes = voltas.length;
+    claims = claimsBoas(Date.now(), { hd: undefined, email: "ana.pessoal@gmail.com", sub: "sub-app-1" });
+    const r = await fetch(`${base}/api/sessao/google/callback?code=c&state=${encodeURIComponent(loc.searchParams.get("state")!)}`, { redirect: "manual", headers: { cookie } });
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("http://127.0.0.1:50123/retorno?estado=estado-do-loopback-01&codigo=codigo-guardado");
+    expect(r.headers.getSetCookie().some((c) => c.startsWith("nod_sessao="))).toBe(false);
+    expect(voltasApp.at(-1)).toMatchObject({ bilhete, g: { sub: "sub-app-1", autoridade: true } });
+    expect(voltas.length).toBe(antes);
+  });
+
+  it("ADA-242: bilhete do app adulterado não abre o Google com intenção de conta", async () => {
+    const ruim = cunharBilheteApp("outro-segredo-qualquer-com-mais-de-32-chars", { escopo: ANA, sid: "s", t: Date.now(), porta: 50_123, estado: "estado-do-loopback-01", desafio: "d".repeat(43) });
+    const r = await fetch(`${base}/api/sessao/google?conta-app=${encodeURIComponent(ruim)}`, { redirect: "manual" });
+    expect(new URL(r.headers.get("location")!, base).toString()).toBe(`${base}/?conta=recusado`);
   });
 });

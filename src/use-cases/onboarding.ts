@@ -148,6 +148,25 @@ export const definirEtapaOnboarding: CasoDeUso<{ etapa: unknown }, LinhaOnboardi
   return { data: await deps.repos.onboarding.definirEtapa(etapa) };
 };
 
+/**
+ * ADA-242 (spec onboarding-jornada-a §4; NOD_ONBOARDING_TEXTO): a conversa por TEXTO com o Nod faz só duas perguntas
+ * (apelido e objetivo, sem o tamanho do time) e manda as respostas junto com a etapa 'configurando'. Grava como a
+ * entrevista por voz gravaria (o objetivo vira memória da guia); valor vazio ou ausente fica de fora (o "Pular").
+ */
+export const anotarRespostasDeTexto: CasoDeUso<{ apelido?: unknown; objetivo?: unknown }, LinhaOnboarding> = async (deps, input) => {
+  let linha = await deps.repos.onboarding.buscar();
+  if (linha.etapa === "concluido") throw new ErroDeDominio("estado_invalido", { cause: "onboarding concluído" });
+  for (const campo of ["apelido", "objetivo"] as const) {
+    const bruto = input[campo];
+    const valor = typeof bruto === "string" ? normalizarCampo(campo, bruto) : null;
+    if (valor === null) continue;
+    linha = await deps.repos.onboarding.anotar(campo, valor);
+    if (campo === "objetivo" && linha.guiaId) await deps.repos.memorias.criar({ agenteId: linha.guiaId, tipo: "fato", texto: `${linha.campos.apelido ?? "A pessoa"} quer que os bots: ${valor}`, origem: "agente" });
+    log("info", "onboarding_campo", { campo, canal: "texto" });
+  }
+  return { data: linha };
+};
+
 export const concluirOnboarding: CasoDeUso<Record<string, never>, LinhaOnboarding> = async (deps) => {
   const linha = await deps.repos.onboarding.concluir(deps.agora());
   log("info", "onboarding_concluido", { tamanho_time: linha.campos.tamanhoTime, com_bot: linha.botId !== null });

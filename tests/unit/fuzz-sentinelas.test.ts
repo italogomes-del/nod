@@ -120,6 +120,15 @@ describe("sentinelas do fuzz (NOD-398)", () => {
     expect(planoDoServidor({ registro, pendentes: [], rotas, semente: 5, n: 3, ids: IDS }).casos).toEqual([]);
   });
 
+  it("ADA-242: /conta/codigo e /conta/google/trocar contam como conta.entrar (não viram ação sintética sem leitura)", () => {
+    const registro = REGISTRO_DE_ACOES as readonly DefinicaoAcao[];
+    const rotas: RotaDoServidor[] = [{ metodo: "POST", padrao: new RegExp("^\\/conta\\/codigo$"), publica: true }, { metodo: "POST", padrao: new RegExp("^\\/conta\\/google\\/trocar$"), publica: true }];
+    const p = planoDoServidor({ registro, pendentes: ["conta.entrar"], rotas, semente: 1, n: 2, ids: IDS });
+    expect(p.casos.filter((c) => c.acao.startsWith("conta.sem_acao"))).toEqual([]);
+    expect(p.casos.filter((c) => c.acao === "conta.entrar").length).toBeGreaterThan(0);
+    expect(p.semRota).not.toContain("conta.entrar");
+  });
+
   it("as ações de conta (sem rota de pessoa) só contam quando a rota de /conta DELAS existe", () => {
     const registro = REGISTRO_DE_ACOES as readonly DefinicaoAcao[];
     const contas = registro.filter((a) => a.id.startsWith("conta.")).map((a) => a.id);
