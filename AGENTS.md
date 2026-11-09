@@ -23,6 +23,7 @@ node scripts/alvos-44px/rodar.ts [claro|escuro]   # auditoria de toque do CELULA
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run prompt:referencia   # NOD-163: regrava tests/unit/domain/__prompts__/ (o prompt de sistema inteiro por cenário, estável × volátil, e tamanhos.json) — só quando a mudança no prompt é de propósito
+npm run oss:verificar       # ADA-282 (ADR-160): exporta o snapshot público a seco (oss/manifesto.json) e varre (proibidos, imagens, gitleaks); push só com --push=<repo> e decisão do Marlon
 npm run paridade            # NOD-391 (ADR-135): regrava docs/paridade.md a partir do registro de ações; sob CI ou com --conferir só confere
 npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test); roda no fim do check
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra

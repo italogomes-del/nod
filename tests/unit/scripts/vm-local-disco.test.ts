@@ -120,7 +120,8 @@ describe("infra/vm-local/construir-disco.sh (NOD-93)", () => {
     });
   });
 
-  it("o release gera o disco por arquitetura em runner nativo, atrás de NOD_VM_LOCAL, e o publica no rascunho", () => {
+  // ADA-282: o workflow de release é da versão hospedada e não vai para o repo público (oss/manifesto.json).
+  it.skipIf(!existsSync(join(RAIZ, ".github/workflows/desktop-release.yml")))("o release gera o disco por arquitetura em runner nativo, atrás de NOD_VM_LOCAL, e o publica no rascunho", () => {
     const wf = readFileSync(join(RAIZ, ".github/workflows/desktop-release.yml"), "utf8");
     expect(wf).toContain("vm-local:");
     expect(wf).toContain("if: vars.NOD_VM_LOCAL == '1'");

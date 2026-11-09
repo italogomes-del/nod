@@ -103,7 +103,8 @@ describe("assinatura e empacotamento (NOD-93)", () => {
     expect(builder).toMatch(/- from: dist\/vm-local\/\$\{arch\}\n\s+to: vm-local/);
   });
 
-  it("o release monta os binários só com NOD_VM_LOCAL=1, antes do electron-builder", () => {
+  // ADA-282: o workflow de release é da versão hospedada e não vai para o repo público (oss/manifesto.json).
+  it.skipIf(!existsSync(join(RAIZ, ".github/workflows/desktop-release.yml")))("o release monta os binários só com NOD_VM_LOCAL=1, antes do electron-builder", () => {
     const wf = readFileSync(join(RAIZ, ".github/workflows/desktop-release.yml"), "utf8");
     const passo = wf.indexOf("node scripts/desktop/vm-local-binarios.ts --arch \"$ARCH\"");
     expect(passo).toBeGreaterThan(0);

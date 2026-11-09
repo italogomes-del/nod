@@ -32,6 +32,7 @@
     "lint": "eslint .",
     "fence:domain": "bash scripts/prove-domain-fence.sh",
     "fence:migrations": "node scripts/migracao-aditiva.ts",
+    "oss:verificar": "node scripts/oss/exportar.mjs",
     "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down",
     "docker:reset": "docker compose down -v && docker compose up -d --wait",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -86,7 +86,8 @@ describe("scripts/vm-local/digest-do-disco.ts e o release (NOD-93, item 2 do #51
     expect(() => gravarDigest({ textoSha: `${SHA}  ${amd}\n`, versao: "2.0.0", arch: "arm64", saida: pasta })).toThrow(/não traz/);
   });
 
-  it("o job mac espera o vm-local e grava o sha256 depois dos binários, antes do electron-builder", () => {
+  // ADA-282: o workflow de release é da versão hospedada e não vai para o repo público (oss/manifesto.json).
+  it.skipIf(!existsSync(join(RAIZ, ".github/workflows/desktop-release.yml")))("o job mac espera o vm-local e grava o sha256 depois dos binários, antes do electron-builder", () => {
     const wf = readFileSync(join(RAIZ, ".github/workflows/desktop-release.yml"), "utf8");
     expect(wf).toContain("needs: [verify, vm-local]");
     expect(wf).toContain("name: vm-sha-${{ matrix.arch }}");

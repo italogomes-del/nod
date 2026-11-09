@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   compararEntitlements,
@@ -246,7 +246,8 @@ describe("5/11/2026: o stapler repete só a queda do CloudKit (saída 68)", () =
     expect(deveRepetirStapler({ codigo: 65 }, 1)).toBe(false);
     expect(deveRepetirStapler({ codigo: 68 }, 2, 2)).toBe(false);
   });
-  it("o workflow usa o script com retry nos dois stapler e repete o electron-builder", () => {
+  // ADA-282: o workflow de release é da versão hospedada e não vai para o repo público (oss/manifesto.json).
+  it.skipIf(!existsSync(new URL("../../../.github/workflows/desktop-release.yml", import.meta.url)))("o workflow usa o script com retry nos dois stapler e repete o electron-builder", () => {
     const wf = readFileSync(new URL("../../../.github/workflows/desktop-release.yml", import.meta.url), "utf8");
     expect(wf).not.toMatch(/xcrun stapler (staple|validate)/);
     expect(wf).toMatch(/scripts\/desktop\/stapler\.sh staple "\$DMG"/);

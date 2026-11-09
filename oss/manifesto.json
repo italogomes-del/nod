@@ -1,0 +1,108 @@
+{
+  "versao": 1,
+  "repoPublico": "marlonwlv/nod",
+  "raizPublica": "oss/publico",
+  "gitleaksConfig": "oss/gitleaks.toml",
+  "excluir": [
+    "oss/**",
+    "scripts/oss/**",
+    "tests/unit/scripts/oss-exportar.test.ts",
+    "docs/open-source/**",
+    "fechado/**",
+
+    "infra/gcp/**",
+    ".github/workflows/deploy.yml",
+    ".github/workflows/ensaio-restauracao.yml",
+    ".github/workflows/release-pendente.yml",
+    ".github/workflows/desktop-release.yml",
+
+    "docs/deploy-gcp.md",
+    "docs/runbook-producao.md",
+    "docs/release-desktop.md",
+    "docs/processo-de-release.md",
+    "docs/auditoria-2026-10-15/**",
+    "docs/uat-*",
+    "docs/uat-*/**",
+    "docs/planos/**",
+    "docs/plano-*",
+    "docs/comparacao-*",
+    "docs/grokbot-comparison.md",
+    "docs/internal-first.md",
+    "docs/prototipos/**",
+    "docs/design/**",
+
+    "scripts/diario-prod.mjs",
+    "scripts/dogfood-quadro.sql",
+    "scripts/backup-local.sh",
+    "scripts/cloud/**",
+    "scripts/limpar-esperas-nod-377.ts",
+    "scripts/recalcular-custo-bifurcado.ts",
+    "tests/integration/recalcular-custo-bifurcado.test.ts",
+    "tests/unit/infra/**",
+    "tests/unit/scripts/ensaiar-restauracao.test.ts",
+    "tests/unit/desktop/atualizacao-release.test.ts",
+    "tests/unit/desktop/publicar-atualizacao.regression-1.test.ts",
+    "tests/unit/desktop/release-mac.test.ts",
+    "tests/unit/desktop/release-pendente.test.ts",
+    "tests/unit/scripts/app-windows-release.test.ts",
+    "tests/unit/scripts/instalador-exe-windows.test.ts",
+    "scripts/desktop/publicar-atualizacao.sh",
+    "scripts/desktop/release-mac.sh",
+    "scripts/desktop/release-pendente.mjs",
+
+    "docs/roadmap/**",
+    "docs/referencias/ditado-grok/**",
+    ".cursor/**",
+    "prototypes/**"
+  ],
+  "imagensRevisadas": [
+    "desktop/resources/icon.png",
+    "site/apple-touch-icon.png",
+    "site/icon-192.png",
+    "site/og.png",
+    "web/public/icons/*.png",
+    "web/public/fontes/geist-*.woff2"
+  ],
+  "reescrever": [
+    { "de": "marlon@leapy.com.br", "para": "pessoa1@exemplo.com", "caixa": "preservar" },
+    { "de": "marlon@gamefik.com", "para": "admin1@exemplo.com", "caixa": "preservar" },
+    { "de": "leapy.com.br", "para": "exemplo.com", "caixa": "preservar" },
+    { "de": "gamefik.com", "para": "exemplo.com", "caixa": "preservar" },
+    { "de": "nod-producao", "para": "nod-exemplos" },
+    { "de": "nod-vm@", "para": "app-vm@" },
+    { "de": "34-39-164-139", "para": "203-0-113-100" },
+    { "regex": "leapy", "para": "lumen", "caixa": "preservar" },
+    { "regex": "Ingrid", "para": "Helena" },
+    { "regex": "xumbrega", "para": "faustino", "caixa": "preservar" },
+    { "regex": "tarsila", "para": "teodora", "caixa": "preservar" },
+    { "de": "EngNod", "para": "EngApp" }
+  ],
+  "packageJson": {
+    "remover": ["private"],
+    "definir": { "license": "Apache-2.0" },
+    "removerScripts": []
+  },
+  "proibidos": [
+    { "padrao": "172e1fdf-", "motivo": "tenant de produção do Marlon" },
+    { "padrao": "nod-producao", "motivo": "projeto GCP de produção" },
+    { "regex": "10\\.183\\.\\d+\\.\\d+", "motivo": "rede privada da produção (Cloud SQL)" },
+    { "regex": "34[.-]39[.-]164[.-]139", "motivo": "IP público da produção" },
+    { "padrao": "nod-vm@", "motivo": "service account da produção" },
+    { "regex": "marlon@(gamefik|leapy)|marlonwlv@", "flags": "i", "motivo": "e-mail real do Marlon" },
+    { "regex": "@(gamefik\\.com|leapy\\.com\\.br)", "flags": "i", "motivo": "domínio real de e-mail" },
+    { "regex": "leapy", "flags": "i", "motivo": "cliente real (Leapy)" },
+    { "regex": "\\bLIPE\\b", "flags": "", "motivo": "cliente real (LIPE)" },
+    { "regex": "Doze Cont[aá]bil", "motivo": "cliente real (Doze)" },
+    { "regex": "Ingrid", "flags": "", "motivo": "pessoa real" },
+    { "regex": "Xumbrega|Tarsila|EngNod", "flags": "i", "motivo": "bot interno da esteira" },
+    { "regex": "NOD_SESSAO_SEGREDO=(?!troque-)[^\\s$<]{8,}", "motivo": "segredo de sessão preenchido" },
+    { "regex": "NOD_CREDENTIAL_KEY=(?!0{63}1\\b)[^\\s$<]{8,}", "motivo": "chave de credencial preenchida" }
+  ],
+  "aceitos": [
+    {
+      "arquivos": ["src/db/migrations/**", "src/db/seed/**", ".env.example", "tests/**", "docs/adr/**"],
+      "proibido": "tenant de produção do Marlon",
+      "porque": "achado 5 da auditoria: o id está em migrações aplicadas (0001, 0004, 0110), que não se editam; é o tenant do seed, um identificador sem acesso sozinho (RLS + sessão)"
+    }
+  ]
+}
