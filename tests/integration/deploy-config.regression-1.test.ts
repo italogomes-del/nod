@@ -174,14 +174,16 @@ describe("PRs do GitHub no quadro no deploy: REPOS configurado, laço desligado 
   });
 });
 
-describe("atualização automática do app do Mac no deploy: desligada até publicar (NOD-132, ADR-149)", () => {
-  it("o config.env traz a versão VAZIA e o bucket; o deploy.sh limpa e repassa as duas ao nod.env; o boot aceita", async () => {
+describe("atualização automática do app do Mac no deploy (NOD-132, ADR-149)", () => {
+  // Desde 2026-11-09 (a 1.0.0-rc.7) a versão anunciada pode estar preenchida: o config.env traz vazio (desligada) ou uma
+  // versão com o hash de cada pacote, e nos dois casos o boot aceita.
+  it("o config.env traz a versão (vazia ou publicada com hash) e o bucket; o deploy.sh limpa e repassa ao nod.env; o boot aceita", async () => {
     const { readFile } = await import("node:fs/promises");
     const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
-    expect(config).toMatch(/^NOD_APP_VERSAO_PUBLICADA=$/m);
+    expect(config).toMatch(/^NOD_APP_VERSAO_PUBLICADA=(\d+\.\d+\.\d+(-rc\.\d+)?)?$/m);
     expect(config.match(/^NOD_APP_VERSAO_PUBLICADA=/gm)).toHaveLength(1);
     expect(config).toMatch(/^NOD_APP_ATUALIZACAO_BUCKET=nod-producao-atualizacoes$/m);
-    expect(config).toMatch(/^NOD_APP_ATUALIZACAO_SHA256=$/m);
+    expect(config.match(/^NOD_APP_ATUALIZACAO_SHA256=/gm)).toHaveLength(1);
     const script = await readFile(DEPLOY, "utf8");
     for (const v of ["NOD_APP_VERSAO_PUBLICADA", "NOD_APP_ATUALIZACAO_BUCKET", "NOD_APP_ATUALIZACAO_SHA256"]) {
       expect(script).toContain(`${v}="$(limpo "\${${v}:-}")"`);
@@ -189,9 +191,14 @@ describe("atualização automática do app do Mac no deploy: desligada até publ
     }
     const env = Object.fromEntries([...config.matchAll(/^(NOD_APP_\w+)=(.*)$/gm)].map((m) => [m[1]!, m[2]!]));
     const { lerConfigAtualizacaoApp } = await import("../../src/domain/atualizacao-app.ts");
-    expect(lerConfigAtualizacaoApp(env)).toBeNull();
+    const atual = lerConfigAtualizacaoApp(env);
+    if (env.NOD_APP_VERSAO_PUBLICADA) {
+      expect(atual?.versao).toBe(env.NOD_APP_VERSAO_PUBLICADA);
+      expect(Object.keys(atual?.sha256 ?? {})).toEqual(expect.arrayContaining(["arm64", "x64"]));
+    } else expect(atual).toBeNull();
+    expect(lerConfigAtualizacaoApp({ ...env, NOD_APP_VERSAO_PUBLICADA: "" })).toBeNull();
     // Versão sem o hash dos ZIPs derruba o boot; com o hash, liga.
-    expect(() => lerConfigAtualizacaoApp({ ...env, NOD_APP_VERSAO_PUBLICADA: "1.2.3" })).toThrow(/exige NOD_APP_ATUALIZACAO_SHA256/);
+    expect(() => lerConfigAtualizacaoApp({ ...env, NOD_APP_VERSAO_PUBLICADA: "1.2.3", NOD_APP_ATUALIZACAO_SHA256: "" })).toThrow(/exige NOD_APP_ATUALIZACAO_SHA256/);
     const sha = `arm64=${"a".repeat(64)},x64=${"b".repeat(64)}`;
     expect(lerConfigAtualizacaoApp({ ...env, NOD_APP_VERSAO_PUBLICADA: "1.2.3", NOD_APP_ATUALIZACAO_SHA256: sha }))
       .toEqual({ versao: "1.2.3", bucket: "nod-producao-atualizacoes", sha256: { arm64: "a".repeat(64), x64: "b".repeat(64) } });
