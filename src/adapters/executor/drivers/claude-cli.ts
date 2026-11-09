@@ -94,11 +94,13 @@ export type LigacaoClaudeCli = {
 export { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 
 /**
- * Janela do `--autocompact`. definido em 2026-09-18: mesmo valor do openmausbot
- * (`server/drivers/claude.ts:295`). Explícito em vez de "auto" — comportamento previsível entre
- * versões. Existe porque, sem teto de passos, a tarefa longa precisa compactar em vez de estourar.
+ * Janela do `--autocompact`. definido em 2026-09-18 como 200_000 fixo (valor do openmausbot); trocado em 2026-11-09
+ * para "auto": com o Opus de 1M (contextWindow 1_000_000 no result), o teto de 200k fazia o CLI compactar cedo demais
+ * e, com o system prompt e as ferramentas do nod ocupando boa parte da janela, o contexto voltava ao teto em até 3
+ * turnos e o CLI parava com "Autocompact is thrashing" (pico de 132k numa janela de 1 mi). "auto" usa a janela real
+ * do modelo do turno: 200k num modelo de 200k (igual ao de antes), 1M no de 1M.
  */
-export const JANELA_AUTOCOMPACT_TOKENS = 200_000;
+export const JANELA_AUTOCOMPACT = "auto";
 
 /**
  * As flags que montarArgs usa SEMPRE — é a lista conferida contra os floors, e reprovar aqui
@@ -311,7 +313,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     "--model",
     plano.entrada.modelo,
     // Sem teto de passos, a tarefa longa precisa de janela: compactar em vez de bater no limite.
-    ...(entrada.compactar ? ["--autocompact", String(JANELA_AUTOCOMPACT_TOKENS)] : []),
+    ...(entrada.compactar ? ["--autocompact", JANELA_AUTOCOMPACT] : []),
     // definido em 2026-09-28 (0037): o esforço do bot, só quando o help da versão instalada traz a flag.
     ...(entrada.esforco && plano.entrada.esforco ? ["--effort", plano.entrada.esforco] : []),
     // --restricted substitui --setting-sources project: ignora CLAUDE.md, skills e hooks do repo

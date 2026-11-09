@@ -139,7 +139,8 @@ describe("sem teto de passos, com janela de contexto", () => {
   });
   it("--autocompact entra só quando o help da versão instalada oferece a flag", () => {
     const com = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json", compactar: true }).args;
-    expect(valor(com, "--autocompact")).toBe("200000");
+    // A janela real do modelo: um teto fixo de 200k fazia o Opus de 1M compactar em laço ("Autocompact is thrashing").
+    expect(valor(com, "--autocompact")).toBe("auto");
     // Fail-closed: versão sem a flag roda sem ela, em vez de o turno falhar.
     const sem = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json", compactar: false }).args;
     expect(sem).not.toContain("--autocompact");

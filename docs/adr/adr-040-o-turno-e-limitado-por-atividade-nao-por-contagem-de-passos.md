@@ -24,7 +24,7 @@ repositório: Glob, quatro Reads, Edit, Read de conferência. **A premissa mudou
 3. **Ferramenta em andamento é silêncio legítimo.** `tool_use` sem `tool_result` isenta o turno:
    `computador_*` leva até 240s e o proxy serializa as chamadas. A isenção tem teto
    (`ISENCAO_FERRAMENTA_MS`, 480s) para um `tool_result` perdido não isentar para sempre.
-4. **`--autocompact 200000`** para a tarefa longa compactar o contexto em vez de estourá-lo.
+4. **`--autocompact auto`** para a tarefa longa compactar o contexto em vez de estourá-lo (era `200000` até 2026-11-09; ver emenda).
 5. **Dois motivos novos**, porque `sem_progresso` mentia: `turno_travado` (ficou mudo) e
    `trabalho_incompleto` (produziu e não concluiu — o caso do incidente).
 
@@ -98,3 +98,7 @@ de repetição acima, não restaurar `--max-turns`: o contador já demonstrou co
   - o assentamento do turno cria a retomada da aprovação decidida que ele não chegou a receber.
 - **Retomadas se juntam:** toda retomada nasce por `enfileirarRetomada`. Se já há uma retomada do mesmo turno na fila, a entrada nova se junta a ela. Vale para acesso, perfil, pasta, resposta a pedido e "Retomar".
 - **Limitação conhecida:** a queda da máquina (`interromperPorMaquina`) não passa pela rede de segurança. Ela já abre o card "Retomar" para a pessoa.
+
+## Emenda 2026-11-09: `--autocompact auto`
+
+O teto fixo de 200k valia para modelos de 200k. Com o Opus de 1M (`contextWindow` 1_000_000), ele fazia o CLI compactar cedo; o system prompt e as ferramentas do nod ocupam boa parte desses 200k, o contexto voltava ao teto em até 3 turnos e o CLI parava com "Autocompact is thrashing" (relato da Ingrid, pico de 132k numa janela de 1 mi). `auto` usa a janela real do modelo: nos modelos de 200k o comportamento é o mesmo de antes. Gatilho de reversão: um CLI em que `auto` mude de significado ou volte a dar thrashing com a janela real.
