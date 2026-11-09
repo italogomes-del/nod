@@ -6,6 +6,7 @@
   "excluir": [
     "oss/**",
     "scripts/oss/**",
+    "tests/unit/oss/**",
     "tests/unit/scripts/oss-exportar.test.ts",
     "tests/unit/oss/**",
     "docs/open-source/**",
