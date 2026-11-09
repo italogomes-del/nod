@@ -59,8 +59,8 @@ describe("montarRoteiro", () => {
   it("só troca a URL do clone e as portas; o resto é o README literal", () => {
     const r = montarRoteiro(passos, base);
     const literal = (n: string) => passos.find((p) => p.nome === n)!.comandos;
-    expect(r.preparar[0]).toBe(`git clone '/tmp/origem/nod.git'`);
-    expect(literal("clonar")[0]).toBe(`git clone ${URL_PUBLICA}`);
+    expect(r.preparar[0]).toBe(`git clone '/tmp/origem/nod.git' nod`);
+    expect(literal("clonar")[0]).toBe(`git clone ${URL_PUBLICA} nod`);
     expect(r.preparar.slice(1, 1 + literal("clonar").length - 1 + literal("instalar").length)).toEqual([...literal("clonar").slice(1), ...literal("instalar")]);
     expect(r.subir).toEqual(literal("subir"));
     expect(r.subir.join("\n")).toContain("NOD_LOGIN=stub npm run dev");
@@ -120,7 +120,7 @@ describe("revisão: segurança e limpeza do seguir-readme", () => {
   it("a origem do clone vai entre aspas: pasta com espaço ou $(...) não quebra nem executa nada", () => {
     const origem = "/tmp/a b/$(touch pwned)'x/nod.git";
     const r = montarRoteiro(passos, { ...base, origem });
-    const eco = spawnSync("bash", ["-c", r.preparar[0]!.replace(/^git clone /, "printf '%s' ")], { encoding: "utf8", cwd: mkdtempSync(join(tmpdir(), "aspas-")) });
+    const eco = spawnSync("bash", ["-c", r.preparar[0]!.replace(/^git clone /, "printf '%s' ").replace(/ nod$/, "")], { encoding: "utf8", cwd: mkdtempSync(join(tmpdir(), "aspas-")) });
     expect(eco.stdout).toBe(origem);
   });
 
@@ -175,7 +175,7 @@ describe("revisão: segurança e limpeza do seguir-readme", () => {
       writeFileSync(
         readme,
         [
-          bloco("clonar", `git clone ${URL_PUBLICA}\ncd nod`),
+          bloco("clonar", `git clone ${URL_PUBLICA} nod\ncd nod`),
           bloco("instalar", "true"),
           bloco("banco-docker", "true"),
           bloco("banco-proprio", "true"),

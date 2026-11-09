@@ -35,7 +35,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-export const URL_PUBLICA = "https://github.com/marlonwlv/nod.git";
+export const URL_PUBLICA = "https://github.com/marlonwlv/nod-oss.git";
 export const ORDEM = ["clonar", "instalar", "banco-docker", "banco-proprio", "subir", "conferir"];
 
 /** Aspas simples de shell: o caminho vira um argumento só, sem expansão. */
@@ -183,7 +183,7 @@ const log = (s) => console.log(`[seguir-readme] ${s}`);
 
 /** Snapshot do commit atual com oss/publico/ por cima da raiz, num repositório git próprio (o "repo público"). */
 function montarOrigem(pasta) {
-  // termina em /nod.git como a URL pública, para o `git clone` criar a mesma pasta `nod` que o README espera
+  // termina em /nod.git; o README passa a pasta `nod` explícita no git clone (o repo público é nod-oss)
   const origem = join(pasta, "origem", "nod.git");
   mkdirSync(origem, { recursive: true });
   const tar = execFileSync("git", ["-C", RAIZ, "archive", "--format=tar", "HEAD"], { maxBuffer: 1 << 30 });

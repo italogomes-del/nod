@@ -110,7 +110,7 @@ Como roda (`scripts/oss/exportar.mjs`, ADR-160):
    copia `oss/publico/` (LICENSE, NOTICE, LICENSING.md, README.md, CONTRIBUTING.md) para a raiz.
 2. Varre o snapshot: padrões proibidos (tenant, projeto GCP, IPs, e-mails e clientes reais, bots internos, segredo
    preenchido), imagens fora da lista revisada e o gitleaks com `oss/gitleaks.toml`.
-3. Publica **só** com `--push=marlonwlv/nod` (igual ao manifesto), varredura limpa, gitleaks instalado, `NOTICE` sem
+3. Publica **só** com `--push=marlonwlv/nod-oss` (igual ao manifesto), varredura limpa, gitleaks instalado, `NOTICE` sem
    titular pendente e privado sem alteração por commitar. Cada export vira **um commit** sobre a `main` pública, com a
    mensagem `Export de gamefik/nod@<sha>`.
 4. A CI do privado roda o job `oss` (export a seco + varredura + typecheck do snapshot), sem push e sem bloquear na
@@ -164,7 +164,7 @@ recomendado** enquanto o histórico tiver os achados 2, 3 e 6, mas, se for o cam
 
 1. **Titular do copyright**: Marlon Wanderllich (`NOTICE` e `LICENSING.md`). Licença: **Apache 2.0** (o núcleo); a
    marca "nod" é do Marlon (`LICENSING.md`).
-2. **Repo público**: `marlonwlv/nod`.
+2. **Repo público**: `marlonwlv/nod-oss` (`marlonwlv/nod` é o nome antigo do `gamefik/nod` e redireciona para ele; criar um repo lá mataria o redirecionamento e faria remotes antigos empurrarem código privado para o público).
 3. **Exportar** com histórico zerado (o `gamefik/nod` não é transferido e continua privado, com WIF, secrets e
    ambiente `producao` como estão).
 4. **Criar o repo público e rodar o primeiro `--push`**: autorizado; feito depois do merge deste PR.

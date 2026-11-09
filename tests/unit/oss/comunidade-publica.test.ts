@@ -43,7 +43,7 @@ describe("comunidade do repo público (oss/publico)", () => {
 
   it("o README tem o roteiro de rodar local: clone, npm ci, .env do exemplo, banco, NOD_LOGIN=stub e /api/saude", () => {
     const passos = Object.fromEntries(extrairPassos(README).map((p) => [p.nome, p.comandos.join("\n")]));
-    expect(passos.clonar).toMatch(/^git clone https:\/\/github\.com\/marlonwlv\/nod\.git\ncd nod$/);
+    expect(passos.clonar).toMatch(/^git clone https:\/\/github\.com\/marlonwlv\/nod-oss\.git nod\ncd nod$/);
     expect(passos.instalar).toContain("npm ci");
     expect(passos.instalar).toContain("cp .env.example .env");
     expect(passos["banco-docker"]).toBe("npm run dev:setup");
@@ -108,7 +108,7 @@ describe("comunidade do repo público (oss/publico)", () => {
     }
     const config = ler(".github/ISSUE_TEMPLATE/config.yml");
     expect(config).toMatch(/^blank_issues_enabled: false$/m);
-    expect(config).toContain("https://github.com/marlonwlv/nod/security/advisories/new");
+    expect(config).toContain("https://github.com/marlonwlv/nod-oss/security/advisories/new");
   });
 
   it("SECURITY e conduta têm o canal de contato; CONTRIBUTING pede DCO (Signed-off-by), não CLA", () => {

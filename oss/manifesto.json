@@ -1,12 +1,13 @@
 {
   "versao": 1,
-  "repoPublico": "marlonwlv/nod",
+  "repoPublico": "marlonwlv/nod-oss",
   "raizPublica": "oss/publico",
   "gitleaksConfig": "oss/gitleaks.toml",
   "excluir": [
     "oss/**",
     "scripts/oss/**",
     "tests/unit/scripts/oss-exportar.test.ts",
+    "tests/unit/oss/**",
     "docs/open-source/**",
     "fechado/**",
 
