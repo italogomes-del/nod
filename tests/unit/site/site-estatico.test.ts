@@ -146,4 +146,12 @@ describe("site estático (site/)", () => {
     expect(ler("sitemap.xml")).toContain(`<loc>https://nodbot.ai/${slug}</loc>`);
     expect(html).toContain(`href="/${slug}"`);
   });
+  it("11. ADA-287: o bloco Open source existe, aponta para o repo público e o CONTRIBUTING, e fica escondido até o repo abrir", () => {
+    const bloco = /<section id="open-source"[^>]*>[\s\S]*?<\/section>/.exec(html)?.[0];
+    expect(bloco).toBeDefined();
+    expect(bloco!.slice(0, bloco!.indexOf(">"))).toMatch(/\shidden(\s|$)/);
+    expect(bloco).toContain('href="https://github.com/marlonwlv/nod"');
+    expect(bloco).toContain('href="https://github.com/marlonwlv/nod/blob/main/CONTRIBUTING.md"');
+    expect(bloco).not.toMatch(/gamefik/i);
+  });
 });
