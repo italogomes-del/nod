@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLASSES_ERRO_FORNECEDOR, classificarErroFornecedor, ehErroTransitorio, FRASE_ERRO_FORNECEDOR, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase } from "../../../src/domain/erro-fornecedor.ts";
+import { appSemJanelaReal, CLASSES_ERRO_FORNECEDOR, classificarErroFornecedor, ehErroTransitorio, FRASE_ERRO_FORNECEDOR, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, VERSAO_APP_ATUALIZA_SOZINHO, VERSAO_APP_JANELA_REAL } from "../../../src/domain/erro-fornecedor.ts";
 import { redigir } from "../../../src/domain/redacao.ts";
 import { redigirSegredos } from "../../../src/domain/segredos.ts";
 
@@ -83,6 +83,33 @@ describe("erro do fornecedor em classe fechada (NOD-174)", () => {
     expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.teto_de_gasto[0])).toBe("a organização atingiu o teto de gasto do mês no Claude Code; peça a quem administra a conta para subir o teto");
     expect(fraseDoErroFornecedor(null, AMOSTRAS.teto_de_gasto[1])).toBe("a organização atingiu o teto de gasto do mês na sua IA; peça a quem administra a conta para subir o teto");
     expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[0])).toBe("o histórico enche de novo logo depois de resumido e o Claude Code parou; use /nova-sessao e peça de novo");
+  });
+
+  it("2026-11-09: o laço de compactação num app anterior à rc.7 manda atualizar; na rc.7, sem versão ou noutra IA, a frase de sempre", () => {
+    const antiga = "o histórico enche de novo logo depois de resumido e o Claude Code parou; o nod deste computador está na versão 1.0.0-rc.6, que resume cedo demais: reinicie o nod para atualizar e peça de novo";
+    expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[0], { versaoApp: "1.0.0-rc.6" })).toBe(antiga);
+    expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[1], { versaoApp: "0.9.3" })).toContain("versão 0.9.3, que resume cedo demais");
+    const deSempre = FRASE_ERRO_FORNECEDOR.autocompactacao.replace("{o}", "o Claude Code");
+    for (const versaoApp of ["1.0.0-rc.7", "1.0.0", "1.2.0-rc.1", null, undefined, "", "lixo; rm -rf", "1.0.0-beta.1"]) {
+      expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[0], { versaoApp })).toBe(deSempre);
+    }
+    // O driver antigo é o do Claude Code: o Codex no mesmo app não ganha a frase de atualizar.
+    expect(fraseDoErroFornecedor("codex-cli", AMOSTRAS.autocompactacao[0], { versaoApp: "1.0.0-rc.6" })).toBe(FRASE_ERRO_FORNECEDOR.autocompactacao.replace("{o}", "o Codex"));
+    // Outra classe no app antigo segue com a frase dela.
+    expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.login_expirado[0], { versaoApp: "1.0.0-rc.6" })).toBe(fraseDoErroFornecedor("claude-cli", AMOSTRAS.login_expirado[0]));
+    expect(appSemJanelaReal(VERSAO_APP_JANELA_REAL)).toBe(false);
+    expect(appSemJanelaReal("1.0.0-rc.6")).toBe(true);
+  });
+
+  it("revisão do #718: app anterior à rc.4 não tem atualização automática — reiniciar não atualiza, a frase manda baixar", () => {
+    const baixar = (v: string) => `o histórico enche de novo logo depois de resumido e o Claude Code parou; o nod deste computador está na versão ${v}, que resume cedo demais e não se atualiza sozinha: baixe a versão nova em nodbot.ai e peça de novo`;
+    for (const v of ["1.0.0-rc.3", "1.0.0-rc.1", "0.4.0-rc.9", "0.9.3"]) {
+      expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[0], { versaoApp: v })).toBe(baixar(v));
+    }
+    expect(VERSAO_APP_ATUALIZA_SOZINHO).toBe("1.0.0-rc.4");
+    for (const v of ["1.0.0-rc.4", "1.0.0-rc.5", "1.0.0-rc.6"]) {
+      expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[0], { versaoApp: v })).toContain(`versão ${v}, que resume cedo demais: reinicie o nod para atualizar`);
+    }
   });
 
   it("vazio, nulo e só espaço são desconhecido, sem frase", () => {

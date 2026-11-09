@@ -1,4 +1,5 @@
 import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
+import { compararVersoesDoApp } from "./versao-app.ts";
 
 /**
  * O erro do Claude Code ou do Codex em classe FECHADA (NOD-174, emenda da ADR-009). Molde: MOTIVO_FALHA_EM_PORTUGUES em
@@ -114,12 +115,48 @@ export const FRASE_ERRO_FORNECEDOR: Readonly<Record<Exclude<ClasseErroFornecedor
   transitorio: "o serviço {do} está instável ou fora do ar; tente de novo em alguns minutos",
 };
 
-/** A frase pronta, ou null quando a classe é `desconhecido`. Nunca o id cru ("claude-cli"). */
-export function fraseDoErroFornecedor(harness: IdHarness | null | undefined, erroCru: string | null | undefined): string | null {
+/**
+ * definido em 2026-11-09 (investigação do "Autocompact is thrashing" da Ingrid, depois do #712): a primeira versão do app
+ * cujo driver do Claude Code passa `--autocompact auto` (a janela real do modelo, 1M no Opus de 1M). Antes dela o driver
+ * passava 200_000: o Claude Code compacta a partir de ~167 mil, e o que volta depois de cada resumo (prompt e ferramentas
+ * do nod em cache, ~76 mil, mais o resumo e os anexos que ele reanexa, ~46 mil) já ocupa ~122 mil. Sobram ~45 mil, uma
+ * ou duas ferramentas enchem, e na 4ª compactação seguida o CLI para. Medido em produção: o Mac com a 1.0.0-rc.6
+ * compactava em 159–252 mil; o motor com o driver novo compactou em 967.787 (o limiar de 1M). O driver roda dentro do
+ * app (Electron), então só um app atualizado e reiniciado sai do laço; `/nova-sessao` não resolve.
+ */
+export const VERSAO_APP_JANELA_REAL = "1.0.0-rc.7";
+
+/** A frase do laço de compactação quando o app da máquina é anterior a VERSAO_APP_JANELA_REAL (e tem atualização automática). */
+export const FRASE_AUTOCOMPACTACAO_APP_ANTIGO = "o histórico enche de novo logo depois de resumido e {o} parou; o nod deste computador está na versão {versao}, que resume cedo demais: reinicie o nod para atualizar e peça de novo";
+
+/**
+ * Revisão do #718 (2026-11-09): a primeira versão do app com atualização automática (NOD-132, ADR-149; o Mac e o Windows
+ * entraram na 1.0.0-rc.4). Antes dela reiniciar não atualiza nada: a frase manda baixar a versão nova.
+ */
+export const VERSAO_APP_ATUALIZA_SOZINHO = "1.0.0-rc.4";
+
+/** A frase do laço de compactação num app anterior a VERSAO_APP_ATUALIZA_SOZINHO (sem atualização automática). */
+export const FRASE_AUTOCOMPACTACAO_APP_SEM_ATUALIZACAO = "o histórico enche de novo logo depois de resumido e {o} parou; o nod deste computador está na versão {versao}, que resume cedo demais e não se atualiza sozinha: baixe a versão nova em nodbot.ai e peça de novo";
+
+/** O app anunciou uma versão válida e anterior à do `--autocompact auto`. Sem versão (app muito antigo, motor sem header) ou inválida: não afirma nada. */
+export function appSemJanelaReal(versaoApp: string | null | undefined): versaoApp is string {
+  const c = compararVersoesDoApp(versaoApp, VERSAO_APP_JANELA_REAL);
+  return c !== null && c < 0;
+}
+
+/**
+ * A frase pronta, ou null quando a classe é `desconhecido`. Nunca o id cru ("claude-cli"). `versaoApp` é o que a máquina
+ * do turno anunciou (x-nod-versao): no laço de compactação do Claude Code num app anterior à rc.7, a ação é atualizar.
+ */
+export function fraseDoErroFornecedor(harness: IdHarness | null | undefined, erroCru: string | null | undefined, opcoes: { versaoApp?: string | null } = {}): string | null {
   const classe = classificarErroFornecedor(erroCru);
   if (classe === "desconhecido") return null;
   const nome = HARNESSES.find((h) => h.id === harness)?.nome;
-  return FRASE_ERRO_FORNECEDOR[classe]
+  const appAntigo = classe === "autocompactacao" && harness === "claude-cli" && appSemJanelaReal(opcoes.versaoApp);
+  // A versão só entra depois de validada (x.y.z ou x.y.z-rc.N, versao-app.ts): nada vindo da máquina além disso.
+  const semAtualizacao = appAntigo && (compararVersoesDoApp(opcoes.versaoApp, VERSAO_APP_ATUALIZA_SOZINHO) ?? 0) < 0;
+  const molde = semAtualizacao ? FRASE_AUTOCOMPACTACAO_APP_SEM_ATUALIZACAO : appAntigo ? FRASE_AUTOCOMPACTACAO_APP_ANTIGO : FRASE_ERRO_FORNECEDOR[classe];
+  return (appAntigo ? molde.replace("{versao}", opcoes.versaoApp!) : molde)
     .replace("{do}", nome ? `do ${nome}` : "da sua IA")
     .replace("{o}", nome ? `o ${nome}` : "a sua IA")
     .replace("{no}", nome ? `no ${nome}` : "na sua IA")

@@ -103,6 +103,14 @@ describe("Raio-X do turno (revisão contra o canvas, D2 e D3)", () => {
   });
 });
 
+describe("2026-11-09: a versão do app no cabeçalho do Raio-X", () => {
+  it("com a versão gravada pelo servidor, o cabeçalho diz qual app rodou o turno; sem ela, nada muda", () => {
+    const comApp = renderRaioX({ ...CLARICE, execucao: { ...CLARICE.execucao!, versaoApp: "1.0.0-rc.6" } }, "Clarice");
+    expect(comApp).toContain("Claude Code 2.1.284 · app 1.0.0-rc.6");
+    expect(renderRaioX(CLARICE, "Clarice")).not.toContain("app 1.0.0");
+  });
+});
+
 describe("NOD-312: o chip da sessão no Raio-X", () => {
   const abrir = (composicao: Partial<NonNullable<RaioXTurno["composicao"]>>) => renderRaioX({ ...CLARICE, composicao: { ...CLARICE.composicao!, ...composicao } }, "Clarice");
   it("motivo desconhecido (servidor mais novo): só 'recomeçou', nunca 'undefined' (revisão 9)", () => {

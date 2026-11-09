@@ -246,7 +246,7 @@ function cabecalho(r: RaioXTurno, nome: string, onde: string): string {
   const x = r.execucao;
   const fim = x ? ` → ${new Date(r.criadoEm + x.duracaoMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "";
   const quando = `${new Date(r.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${fim}`;
-  const partes = [nome, quando, modeloCurto(x?.modelo ?? r.composicao?.modelo ?? null), x?.versaoCli ? `Claude Code ${x.versaoCli}` : "", r.composicao ? rotuloDaSessao(r.composicao) : "", onde].filter(Boolean);
+  const partes = [nome, quando, modeloCurto(x?.modelo ?? r.composicao?.modelo ?? null), x?.versaoCli ? `Claude Code ${x.versaoCli}` : "", x?.versaoApp ? `app ${x.versaoApp}` : "", r.composicao ? rotuloDaSessao(r.composicao) : "", onde].filter(Boolean);
   return `<header class="rx-cab"><div><h2 id="rx-titulo">Raio-X do turno</h2><p class="rx-meta">${partes.map(esc).join(" · ")}</p></div>${BOTAO_FECHAR}</header>`;
 }
 

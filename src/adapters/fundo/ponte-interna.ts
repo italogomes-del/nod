@@ -309,6 +309,12 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     return harness !== null && maquinas.get(machineId)?.capacidades?.[harness as IdHarness]?.bifurcaSessao === true;
   }
 
+  /** 2026-11-09: a versão que a máquina anunciou (x-nod-versao), para a frase do erro e o Raio-X. Ausente = não anunciou. */
+  function versaoDoApp(machineId: string): { versaoApp?: string } {
+    const v = maquinas.get(machineId)?.versaoApp;
+    return typeof v === "string" && v !== "" ? { versaoApp: v } : {};
+  }
+
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
     if (!tenantsPorPessoa.has(pessoaId)) {
       const pessoas = await (deps.listarPessoas ? deps.listarPessoas() : listarTodas(db));
@@ -650,6 +656,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           causa: e.resultado.causaSemIa ?? null,
           sessao_cli: e.resultado.sessaoCli,
           executor,
+          versao_app: maquinas.get(e.machineId)?.versaoApp ?? null,
         });
       }
       const harnessDoTurno = harnesses.get(e.turnoId) ?? null;
@@ -668,7 +675,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, adotada: adotadosNaEntrega.has(e.turnoId), executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina: porMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
+        const r = await assentarTurno(d, { ...e, adotada: adotadosNaEntrega.has(e.turnoId), executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina: porMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno), ...versaoDoApp(e.machineId) });
         limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito

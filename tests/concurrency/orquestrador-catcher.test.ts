@@ -7,7 +7,8 @@ import type { Registry } from "../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../src/contracts/turno.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
-import { SINAIS_ZERADOS } from "../../src/domain/stream-json.ts";
+import { classificarResultado, interpretarLinhaStreamJson, SINAIS_ZERADOS } from "../../src/domain/stream-json.ts";
+import { definirDestinoDoLog } from "../../src/obs/log.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { criarInterruptor } from "../../src/services/interruptor.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
@@ -93,6 +94,7 @@ afterEach(async () => {
     await trx`delete from agente_memorias where owner_id = ${p}`;
     await trx`delete from memoria_diario where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
+    await trx`delete from turno_diagnosticos where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
     // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
     await trx`delete from trabalhos where owner_id = ${p}`;
@@ -206,6 +208,61 @@ describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process):
       expect((await repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.texto === "tarde").map((m) => m.parcial)).toEqual([true]);
       expect((await repos.decisoes.buscar(decisaoId))?.estado).toBe("decidida");
     });
+  });
+
+  /**
+   * Revisão do #718: a versão do app vem do anúncio da máquina (x-nod-versao), não do corpo da entrega. Pela ponte de
+   * verdade: o Mac na rc.6 que entrega o laço de compactação recebe o aviso de atualizar, o Raio-X grava a versão (e não
+   * a que o app pôs na execução) e o log turno_nao_concluiu leva a versão.
+   */
+  it("laço de compactação de um Mac na rc.6: a versão anunciada chega ao aviso, ao Raio-X e ao log; a do corpo da entrega não vale", async () => {
+    // O dublê de servicosDeTeste emite o plano do catcher; aqui o turno é do Claude Code (o harness vem do plano puxado).
+    const doClaude: typeof services = { ...services, planos: { ...services.planos, emitir: async (trx, turnoId, machineId) => ({ ...(await services.planos.emitir(trx, turnoId, machineId)), harness: "claude-cli" }) } };
+    const ponte = criarPonteInterna(db, { services: doClaude, useCases, executor: "catcher", listarPessoas, esquecerTurno: (id) => services.interruptor.esquecer(id) });
+    const erro = "Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row.";
+    const linhas = [
+      { type: "system", subtype: "init", session_id: randomUUID(), tools: [], model: "claude-opus-5-5", claude_code_version: "2.1.309", apiKeySource: "none" },
+      { type: "result", subtype: "success", is_error: true, result: erro, api_error: "autocompact_thrashing", session_id: randomUUID(), total_cost_usd: 0, usage: {}, num_turns: 4 },
+    ].map((l) => interpretarLinhaStreamJson(JSON.stringify(l)));
+    const execucao = { chamadas: [], chamadasOmitidas: 0, compactacoes: [], janela: 1_000_000, modelo: "claude-opus-5-5", versaoCli: "2.1.309", custoSessaoUsd: 0, ferramentasNoInit: 0, buscaDeFerramentas: false, duracaoMs: 1_000 };
+    const rodar = async (versaoApp: string | undefined, forjada?: string) => {
+      const machineId = randomUUID();
+      await ponte.conectar({ machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1, harnesses: { "claude-cli": PRONTO }, ...(versaoApp ? { versaoApp } : {}) });
+      const c = await escopado(async (trx) => {
+        const deps = depsSobreTrx(trx, PESSOA, { services });
+        const criado = (await executar(deps, criarAgente, { dono: "pessoa", nome: `Iva ${randomUUID().slice(0, 4)}` })).data;
+        criados.agentes.push(criado.agente.id);
+        criados.conversas.push(criado.conversa.id);
+        await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+        return criado;
+      });
+      const plano = await ponte.puxar(PESSOA.pessoaId);
+      expect(plano?.harness).toBe("claude-cli");
+      const resultado = { ...classificarResultado({ eventos: linhas, exitCode: 0, signal: null, stderr: "" }), execucao: { ...execucao, ...(forjada ? { versaoApp: forjada } : {}) } };
+      const logs: string[] = [];
+      definirDestinoDoLog((l) => logs.push(l));
+      try {
+        await ponte.entregar({ turnoId: plano!.turnoId, machineId, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado });
+      } finally {
+        definirDestinoDoLog(null);
+      }
+      await ponte.desconectar(machineId);
+      const log = logs.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.evento === "turno_nao_concluiu");
+      return escopado(async (trx) => {
+        const repos = criarRepos(trx, PESSOA);
+        const aviso = (await repos.mensagens.listarDaConversa(c.conversa.id)).filter((m) => m.turnoId === plano!.turnoId && m.kind === "sistema")[0]?.texto ?? "";
+        return { aviso, raioX: (await repos.raioX.doTurno(plano!.turnoId))?.execucao, log };
+      });
+    };
+    const antigo = await rodar("1.0.0-rc.6", "9.9.9");
+    expect(antigo.aviso).toContain("o nod deste computador está na versão 1.0.0-rc.6, que resume cedo demais: reinicie o nod para atualizar");
+    expect(antigo.raioX?.versaoApp).toBe("1.0.0-rc.6");
+    expect(antigo.log?.versao_app).toBe("1.0.0-rc.6");
+    const semVersao = await rodar(undefined, "1.0.0-rc.6");
+    expect(semVersao.aviso).toContain("use /nova-sessao e peça de novo");
+    expect(semVersao.raioX).toBeDefined();
+    expect(semVersao.raioX).not.toHaveProperty("versaoApp");
+    expect(semVersao.log?.versao_app).toBeNull();
   });
 
   it("iniciarOrquestrador anuncia a máquina com o inventário do registry e abre UM laço por pessoa; parar() fecha tudo", async () => {

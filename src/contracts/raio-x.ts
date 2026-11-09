@@ -57,6 +57,11 @@ export type ExecucaoRaioX = {
    * sempre, só número; ausente = app do Mac anterior a este campo ou turno sem `result`.
    */
   blocosColados?: number;
+  /**
+   * 2026-11-09: a versão do app (x-nod-versao) da máquina que rodou o turno. Gravada pelo SERVIDOR ao assentar, não
+   * pelo driver; ausente = turno anterior a este campo ou máquina que não anunciou versão.
+   */
+  versaoApp?: string;
 };
 
 /**

@@ -176,6 +176,11 @@ describe("ponte: execução na entrega", () => {
     expect(execucao({ ...valida, blocosColados: "2" })).toBeUndefined();
   });
 
+  it("2026-11-09: versaoApp é do servidor (x-nod-versao), nunca do corpo da entrega — o app não forja a versão do Raio-X", () => {
+    expect(execucao({ ...valida, versaoApp: "9.9.9" })).toEqual(valida);
+    expect(execucao({ ...valida, versaoApp: "9.9.9" })).not.toHaveProperty("versaoApp");
+  });
+
   it("fora do formato vira undefined, e a entrega segue sem ela — o turno nunca cai pelo Raio-X", () => {
     expect(execucao({ ...valida, janela: -1 })).toBeUndefined();
     expect(execucao({ ...valida, chamadas: [{ ...valida.chamadas[0], ferramentas: [{ nome: "x".repeat(201), resultadoChars: 1, erro: false }] }] })).toBeUndefined();

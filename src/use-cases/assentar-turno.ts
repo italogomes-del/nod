@@ -51,6 +51,7 @@ import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import { gravarSaidaDoTrabalho } from "./quadro-execucoes.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { acoesDoTurno } from "../domain/acoes-do-turno.ts";
+import { versaoDoAppValida as versaoAppValida } from "../domain/versao-app.ts";
 
 /** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
 /**
@@ -77,7 +78,7 @@ import { acoesDoTurno } from "../domain/acoes-do-turno.ts";
  * `adotada` (definido em 2026-10-15, NOD-245): o turno chegou a esta ponte por adoção (o processo que o despachou caiu num
  * deploy). Quem sabe é a ponte; a máquina nunca diz.
  */
-export type EntradaAssentarTurno = Entrega & { adotada?: boolean; executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[]; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>> };
+export type EntradaAssentarTurno = Entrega & { adotada?: boolean; executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; versaoApp?: string; prontosDaPessoa?: readonly IdHarness[]; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>> };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -366,7 +367,14 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // NOD-273: consumo sem custo informado (o Codex não informa) — o custo da frente passa a ser só parte do que custou.
   if (turno.trabalhoId && custoUsd === null && resultado.tokens.entrada + resultado.tokens.saida > 0) await deps.repos.trabalhos.marcarCustoParcial(turno.trabalhoId);
   // Modo dev (0036): cada chamada e as compactações. Também na entrega tardia, que é a que mais pede explicação.
-  if (resultado.execucao) await deps.repos.raioX.gravarExecucao(turno.id, resultado.execucao);
+  // 2026-11-09: a versão do app que rodou o turno vai junto (o Raio-X mostrava só o Claude Code, e a do app era o que
+  // decidia a janela de compactação; sem ela, a investigação do #712 teve de inferir).
+  // Revisão do #718: a versão é só a do anúncio (entrega.versaoApp, posta pela ponte); a que vier dentro da execução é
+  // descartada, venha a entrega da validação HTTP ou de um laço em processo.
+  if (resultado.execucao) {
+    const { versaoApp: _daExecucao, ...execucao } = resultado.execucao;
+    await deps.repos.raioX.gravarExecucao(turno.id, versaoAppValida(entrega.versaoApp) ? { ...execucao, versaoApp: entrega.versaoApp } : execucao);
+  }
   // O "/" do chat (0038): o catálogo do Mac, quando o app mandou um novo.
   if (resultado.comandos) await deps.repos.comandos.gravar(resultado.comandos);
   // NOD-179: o uso do plano que o CLI informou. Só vale para o CLI que rodou o turno (o harness vem do plano puxado,
@@ -530,7 +538,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
         : desfecho.motivoFalha === "limite_do_plano"
         ? fraseDoLimiteDoPlano(entrega.harness ?? null, resultado.limiteVoltaEm, agora)
         : desfecho.motivoFalha
-          ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru)
+          ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru, { versaoApp: entrega.versaoApp ?? null })
           : null;
     // NOD-171: o limite do plano (do protocolo ou do texto do Codex) leva o payload, para a tela desenhar o card dele.
     const limite = desfecho.motivoFalha === "limite_do_plano" || (desfecho.motivoFalha && classificarErroFornecedor(resultado.erroCru) === "limite_de_uso");

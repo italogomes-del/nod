@@ -255,6 +255,45 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
     });
   });
 
+  /**
+   * 2026-11-09 (o laço da Ingrid depois do #712): o Mac com o app anterior à rc.7 roda o driver com `--autocompact 200000`
+   * e entra no laço de compactação com o Opus de 1M; `/nova-sessao` não tira dele, atualizar o app tira. O `result` é o do
+   * Claude Code 2.1.309 medido no repro (api_error autocompact_thrashing). A versão do app vai também para o Raio-X.
+   */
+  it("laço de compactação num app anterior à rc.7: o aviso manda reiniciar para atualizar, e o Raio-X guarda a versão do app", async () => {
+    const erro = "Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.";
+    const linhas = [
+      { type: "system", subtype: "init", session_id: randomUUID(), tools: [], model: "claude-opus-5-5", claude_code_version: "2.1.309", apiKeySource: "none" },
+      { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 159_004, post_tokens: 20_594 } },
+      { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: erro }] }, error: "invalid_request", api_error: "autocompact_thrashing" },
+      { type: "result", subtype: "success", is_error: true, result: erro, api_error: "autocompact_thrashing", session_id: randomUUID(), total_cost_usd: 0, usage: {}, num_turns: 4 },
+    ].map((l) => interpretarLinhaStreamJson(JSON.stringify(l)));
+    const execucao = { chamadas: [], chamadasOmitidas: 0, compactacoes: [{ em: 148_890, antes: 159_004, depois: 20_594, gatilho: "auto" }], janela: 1_000_000, modelo: "claude-opus-5-5", versaoCli: "2.1.309", custoSessaoUsd: 50.57, ferramentasNoInit: 928, buscaDeFerramentas: true, duracaoMs: 166_140 };
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const casos = [
+        { versaoApp: "1.0.0-rc.6", aviso: "o nod deste computador está na versão 1.0.0-rc.6, que resume cedo demais: reinicie o nod para atualizar e peça de novo", raioX: { versaoApp: "1.0.0-rc.6" } },
+        { versaoApp: "1.0.0-rc.7", aviso: "use /nova-sessao e peça de novo", raioX: { versaoApp: "1.0.0-rc.7" } },
+        { versaoApp: undefined, aviso: "use /nova-sessao e peça de novo", raioX: {} },
+      ];
+      for (const c of casos) {
+        const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+        await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+        const maquina = randomUUID();
+        const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+        const resultado = { ...classificarResultado({ eventos: linhas, exitCode: 0, signal: null, stderr: "" }), execucao };
+        expect(resultado.erroCru).toContain("Autocompact is thrashing");
+        await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, harness: "claude-cli", ...(c.versaoApp ? { versaoApp: c.versaoApp } : {}), fala: { tipo: "texto", texto: resultado.texto }, resultado });
+        const aviso = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.turnoId === turnoId && m.kind === "sistema")[0]?.texto ?? "";
+        expect(aviso).toContain("Turno interrompido: o histórico enche de novo logo depois de resumido e o Claude Code parou");
+        expect(aviso).toContain(c.aviso);
+        const raioX = await deps.repos.raioX.doTurno(turnoId);
+        expect(raioX?.execucao).toMatchObject({ ...execucao, ...c.raioX });
+        if (!c.versaoApp) expect(raioX?.execucao).not.toHaveProperty("versaoApp");
+      }
+    });
+  });
+
   /** NOD-171: o plano do Claude Code no teto. O motivo vem do protocolo (0058) e o aviso diz quando volta. */
   it("limite do plano: rate_limit rejected vira limite_do_plano gravado e o aviso diz a hora em que volta", async () => {
     const voltaEm = Date.now() + 2 * 3_600_000;
