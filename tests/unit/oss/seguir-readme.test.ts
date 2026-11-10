@@ -59,8 +59,8 @@ describe("montarRoteiro", () => {
   it("só troca a URL do clone e as portas; o resto é o README literal", () => {
     const r = montarRoteiro(passos, base);
     const literal = (n: string) => passos.find((p) => p.nome === n)!.comandos;
-    expect(r.preparar[0]).toBe(`git clone '/tmp/origem/nod.git' nod`);
-    expect(literal("clonar")[0]).toBe(`git clone ${URL_PUBLICA} nod`);
+    expect(r.preparar[0]).toBe(`git clone '/tmp/origem/nod.git'`);
+    expect(literal("clonar")[0]).toBe(`git clone ${URL_PUBLICA}`);
     expect(r.preparar.slice(1, 1 + literal("clonar").length - 1 + literal("instalar").length)).toEqual([...literal("clonar").slice(1), ...literal("instalar")]);
     expect(r.subir).toEqual(literal("subir"));
     expect(r.subir.join("\n")).toContain("NOD_LOGIN=stub npm run dev");

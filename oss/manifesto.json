@@ -1,6 +1,6 @@
 {
   "versao": 1,
-  "repoPublico": "marlonwlv/nod-oss",
+  "repoPublico": "marlonwlv/nod",
   "raizPublica": "oss/publico",
   "gitleaksConfig": "oss/gitleaks.toml",
   "excluir": [
