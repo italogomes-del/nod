@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    # NOD-485 (ADR-161): o deploy passou para o marlonwlv/nod. Com vars.DEPLOY_PELO_PUBLICO == '1' este não roda mais
+    # (nem por push, nem à mão); reverter o corte = apagar a variável aqui e zerar DEPLOY_PUBLICO lá.
+    if: vars.DEPLOY_PELO_PUBLICO != '1' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     # Blacksmith (definido em 2026-11-04, junto com o ci.yml): runner novo por deploy. A VM de produção fica na GCP; daqui
     # só saem a imagem (Artifact Registry) e os comandos pelo túnel IAP, com WIF — nada depende da rede interna da GCP.
     # A chave SSH que o gcloud gera em cada runner novo entra no OS Login com validade curta (--ssh-key-expire-after).
@@ -62,7 +64,11 @@ jobs:
       # NOD-331: o Caddyfile vai em estágio (Caddyfile.novo); o deploy.sh só o promove na troca, com a cor nova
       # saudável, e devolve o anterior se a troca não confirmar. Caddyfile.novo.tag diz de que deploy é o estágio: um
       # rollback manual para outra tag não promove o que sobrou de um deploy que falhou (QA NOD-331).
+      # NOD-485: a trava da VM (flock em /opt/nod/deploy.lock, a mesma do deploy.sh, que reaproveita o descritor herdado)
+      # cobre a instalação dos arquivos E o deploy: sem ela, um deploy do marlonwlv/nod trocaria config.env, compose.yml e
+      # Caddyfile.novo no meio deste. A pasta de estágio (~/nod-deploy) é só deste repo; o público usa ~/nod-deploy-publico.
       - name: Deploy
         run: |
           gcloud compute ssh "$VM_NOME" --project="$PROJETO" --zone="$ZONA" --tunnel-through-iap --ssh-key-expire-after=1h --quiet \
-            --command="sudo install -m 0640 ~/nod-deploy/config.env ~/nod-deploy/compose.yml /opt/nod/ && sudo install -m 0640 ~/nod-deploy/Caddyfile /opt/nod/Caddyfile.novo && echo '$SHA' | sudo tee /opt/nod/Caddyfile.novo.tag >/dev/null && sudo install -m 0750 ~/nod-deploy/deploy.sh /opt/nod/ && sudo /opt/nod/deploy.sh '$SHA'"
+            --command="sudo flock -w 1800 -E 75 /opt/nod/deploy.lock sh -c 'install -m 0640 \$1/config.env \$1/compose.yml /opt/nod/ && install -m 0640 \$1/Caddyfile /opt/nod/Caddyfile.novo && echo \$2 > /opt/nod/Caddyfile.novo.tag && install -m 0750 \$1/deploy.sh /opt/nod/ && exec /opt/nod/deploy.sh \$2' _ ~/nod-deploy '$SHA'" ||
+            { rc=$?; [ "$rc" != 75 ] || echo "::error::outro deploy segura /opt/nod/deploy.lock há 30 min; nada foi mexido"; exit "$rc"; }

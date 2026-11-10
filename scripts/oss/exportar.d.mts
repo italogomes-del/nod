@@ -1,6 +1,10 @@
 // Tipos de scripts/oss/exportar.mjs (o script roda com node puro, sem tsx).
 export interface Manifesto {
   versao: 1;
+  /** NOD-485 (ADR-161): o motivo; presente, o --push recusa. */
+  aposentado?: string;
+  /** NOD-485: PRs abertos antes do corte que ainda podem mexer em caminho público (trava.mjs). */
+  travaPermitidos?: number[];
   repoPublico: string;
   raizPublica?: string;
   gitleaksConfig?: string;
@@ -64,3 +68,5 @@ export function hashDoSnapshot(arquivos: Map<string, Arquivo>): string;
 export function exportar(o?: { repo?: string; ref?: string; manifestoPath?: string; saida?: string; gitleaks?: boolean }): Resultado;
 export function limpo(r: Resultado): boolean;
 export function publicar(r: Resultado, o?: { repoPedido?: string; repo?: string; remoto?: string }): string;
+/** NOD-485: o caminho casa com algum dos globs (as mesmas regras do `excluir`). */
+export function casa(caminho: string, globs: readonly string[]): boolean;

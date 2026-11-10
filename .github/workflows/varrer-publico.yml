@@ -1,0 +1,59 @@
+# NOD-485 (ADR-161): o desenvolvimento passou para o repo público marlonwlv/nod, e a lista de nomes internos proibidos
+# (oss/manifesto.json) não pode ir para lá. Este workflow, no privado, clona o público e varre a main e o head de cada
+# PR aberto (scripts/oss/varrer.mjs: proibidos + gitleaks pinado). Achado = run vermelho (o GitHub avisa o Marlon por
+# e-mail) e a lista no resumo do job, que é privado. Só lê o público (repo público, token padrão só para listar os PRs).
+# Actions pinadas pelos mesmos SHAs do ci.yml.
+name: varrer-publico
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: varrer-publico
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  varrer:
+    if: github.repository == 'gamefik/nod'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSAO: "8.28.0"
+      GITLEAKS_SHA256: a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
+      PUBLICO: marlonwlv/nod
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - name: gitleaks (pinado)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSAO}/gitleaks_${GITLEAKS_VERSAO}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          echo "GITLEAKS=$RUNNER_TEMP/gitleaks" >> "$GITHUB_ENV"
+      - name: clone do público (main + heads dos PRs abertos)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone --quiet --filter=blob:none "https://github.com/${PUBLICO}.git" "$RUNNER_TEMP/publico"
+          gh pr list -R "$PUBLICO" --state open --limit 200 --json number --jq '.[].number' > "$RUNNER_TEMP/prs.txt"
+          while read -r n; do git -C "$RUNNER_TEMP/publico" fetch --quiet origin "pull/$n/head:refs/pr/$n" || echo "::warning::PR #$n não buscado"; done < "$RUNNER_TEMP/prs.txt"
+      - name: varredura
+        run: |
+          status=0
+          for ref in origin/main $(git -C "$RUNNER_TEMP/publico" for-each-ref --format='%(refname)' refs/pr/); do
+            echo "### $ref" >> "$GITHUB_STEP_SUMMARY"
+            if node scripts/oss/varrer.mjs "$RUNNER_TEMP/publico" --ref "$ref" > "$RUNNER_TEMP/saida.txt"; then
+              head -1 "$RUNNER_TEMP/saida.txt" >> "$GITHUB_STEP_SUMMARY"
+            else
+              status=1
+              cat "$RUNNER_TEMP/saida.txt" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::achado em $ref (detalhe no resumo do job)"
+            fi
+          done
+          exit "$status"

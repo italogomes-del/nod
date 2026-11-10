@@ -302,6 +302,33 @@ describe("publicar (push só com flag explícita)", () => {
     expect(spawnSync("git", ["-C", b, "rev-parse", "main"]).status).not.toBe(0);
   });
 
+  it("NOD-485 (ADR-161): com o manifesto aposentado, recusa o push mesmo com tudo limpo e não toca o remoto", () => {
+    const b = bare();
+    const repo = repoDeMentira("aposentado", {}, { aposentado: "o público é a fonte da verdade" });
+    const r = semGitleaks(exportar({ repo, saida: join(tmp, "aposentado-saida"), gitleaks: false }));
+    expect(() => publicar(r, { repoPedido: "dono/publico", repo, remoto: b })).toThrow(/aposentado \(ADR-161\): o público é a fonte da verdade/);
+    expect(spawnSync("git", ["-C", b, "rev-parse", "main"]).status).not.toBe(0);
+    expect(() => validarManifesto({ ...base(), aposentado: "" })).toThrow(/aposentado precisa ser o motivo/);
+  });
+
+  it("NOD-485: o --ref de um commit de antes do corte não fura a aposentadoria (vale o manifesto do HEAD)", () => {
+    const b = bare();
+    const repo = repoDeMentira("aposentado-ref", {});
+    const antes = g(repo, "rev-parse", "HEAD");
+    const m = JSON.parse(readFileSync(join(repo, "oss/manifesto.json"), "utf8"));
+    writeFileSync(join(repo, "oss/manifesto.json"), JSON.stringify({ ...m, aposentado: "o público é a fonte da verdade" }));
+    g(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", "aposenta");
+    const r = semGitleaks(exportar({ repo, ref: antes, saida: join(tmp, "aposentado-ref-saida"), gitleaks: false }));
+    expect(r.manifesto.aposentado).toBeUndefined();
+    expect(() => publicar(r, { repoPedido: "dono/publico", repo, remoto: b })).toThrow(/aposentado \(ADR-161\)/);
+    expect(spawnSync("git", ["-C", b, "rev-parse", "main"]).status).not.toBe(0);
+  });
+
+  it("NOD-485: o manifesto real está aposentado (nenhum export apaga a main pública)", () => {
+    const m = validarManifesto(JSON.parse(readFileSync(join(RAIZ, "oss/manifesto.json"), "utf8")));
+    expect(m.aposentado).toMatch(/portar\.mjs/);
+  });
+
   it("publica UM commit por export, sem o histórico do privado e só com a árvore do snapshot", () => {
     const b = bare();
     const repo = repoDeMentira("publica", {});

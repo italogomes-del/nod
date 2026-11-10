@@ -11,6 +11,8 @@
 //   node scripts/oss/exportar.mjs --push=<dono/repo>   publica: só com o repo IGUAL ao manifesto, varredura limpa,
 //                                                      LICENSE sem titular pendente e árvore do privado limpa.
 //
+// NOD-485 (ADR-161): aposentado. O desenvolvimento passou para o marlonwlv/nod; o --push recusa (manifesto.aposentado) e o
+// export a seco segue servindo ao scripts/oss/portar.mjs e ao scripts/oss/varrer.mjs.
 // Sem --push nada sai da máquina. O push nunca roda na CI nem pelos bots: é decisão do Marlon (ADA-282).
 // Sai 0 com a varredura limpa, 1 com achado (padrão proibido ou gitleaks) e 2 com erro de uso/configuração.
 
@@ -35,6 +37,10 @@ export function validarManifesto(m) {
   const erros = [];
   if (!m || typeof m !== "object") throw new Error("manifesto: não é um objeto");
   if (m.versao !== 1) erros.push("versao precisa ser 1");
+  if (m.travaPermitidos !== undefined && (!Array.isArray(m.travaPermitidos) || m.travaPermitidos.some((n) => !Number.isInteger(n) || n <= 0))) {
+    erros.push("travaPermitidos precisa ser lista de números de PR");
+  }
+  if (m.aposentado !== undefined && (typeof m.aposentado !== "string" || !m.aposentado)) erros.push("aposentado precisa ser o motivo (texto)");
   if (typeof m.repoPublico !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(m.repoPublico)) erros.push("repoPublico precisa ser dono/repo");
   if (!Array.isArray(m.excluir) || m.excluir.some((g) => typeof g !== "string" || !g)) erros.push("excluir precisa ser lista de globs");
   if (m.imagensRevisadas !== undefined && (!Array.isArray(m.imagensRevisadas) || m.imagensRevisadas.some((g) => typeof g !== "string" || !g))) {
@@ -76,7 +82,7 @@ export function validarManifesto(m) {
 // "fechado/.env". Por isso o caminho também é testado com o ponto inicial de cada parte trocado por um caractere neutro.
 const semPonto = (caminho) => caminho.replace(/(^|\/)\./g, "$1\u0001");
 const casaUm = (caminho, g) => posix.matchesGlob(caminho, g) || posix.matchesGlob(caminho, `${g.replace(/\/$/, "")}/**`);
-const casa = (caminho, globs) => globs.some((g) => casaUm(caminho, g) || casaUm(semPonto(caminho), g));
+export const casa = (caminho, globs) => globs.some((g) => casaUm(caminho, g) || casaUm(semPonto(caminho), g));
 
 // ---------------------------------------------------------------- leitura do ref
 
@@ -427,8 +433,20 @@ export const limpo = (r) => r.proibidos.length === 0 && Array.isArray(r.gitleaks
  * `remoto` troca a URL só para os testes (repo bare local); a CLI nunca o passa e nenhuma variável de ambiente o
  * preenche, para o push não ir a outro lugar que não o repo do manifesto.
  */
+/** O manifesto do HEAD do repo (ou undefined se não houver). */
+function manifestoAtual(repo) {
+  const r = spawnSync("git", ["-C", repo, "show", "HEAD:oss/manifesto.json"], { encoding: "utf8" });
+  return r.status === 0 ? JSON.parse(r.stdout) : undefined;
+}
+
 export function publicar(r, { repoPedido, repo = RAIZ_REPO, remoto } = {}) {
   const recusas = [];
+  // NOD-485 (ADR-161): o público virou a fonte da verdade. Um export agora apagaria da main pública tudo o que entrou
+  // lá depois do último export; o caminho de volta é scripts/oss/portar.mjs, que abre PR com a diferença.
+  // A política é a do manifesto ATUAL (o do HEAD do privado), não só a do ref exportado: `--ref <commit de antes do corte>`
+  // traz um manifesto sem `aposentado` e, sem isto, passaria.
+  const aposentado = r.manifesto.aposentado || manifestoAtual(repo)?.aposentado;
+  if (aposentado) recusas.push(`o exportador está aposentado (ADR-161): ${aposentado}`);
   if (repoPedido !== r.manifesto.repoPublico) recusas.push(`--push=${repoPedido || "(vazio)"} não é o repo do manifesto (${r.manifesto.repoPublico})`);
   if (!limpo(r)) recusas.push("a varredura tem achados");
   recusas.push(...r.pendencias);

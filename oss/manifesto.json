@@ -1,13 +1,17 @@
 {
   "versao": 1,
+  "aposentado": "desde 2026-11-10 o marlonwlv/nod é a fonte da verdade; leve mudanças com scripts/oss/portar.mjs (PR no público)",
   "repoPublico": "marlonwlv/nod",
   "raizPublica": "oss/publico",
+  "travaPermitidos": [723, 725, 698, 677],
   "gitleaksConfig": "oss/gitleaks.toml",
   "excluir": [
     "oss/**",
     "scripts/oss/**",
     "tests/unit/oss/**",
     "tests/unit/scripts/oss-exportar.test.ts",
+    "tests/unit/scripts/oss-trava-portar.test.ts",
+    ".github/workflows/varrer-publico.yml",
     "tests/unit/oss/**",
     "docs/open-source/**",
     "fechado/**",

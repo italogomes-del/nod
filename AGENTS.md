@@ -44,6 +44,14 @@ O hook é instalado pelo `prepare` do `npm ci`/`npm install`; confira com `ls .g
 (observado em 2026-09-16: o primeiro commit da fundação saiu SEM o hook porque ninguém tinha rodado
 `npm run prepare` — um `git commit` que não imprime a linha do lint-staged é sinal de hook ausente).
 
+**Repo congelado** (NOD-485, ADR-161 no `marlonwlv/nod`, desde 2026-11-10): o desenvolvimento e o deploy passaram para o
+repo público `marlonwlv/nod`. PR novo vai para lá; aqui a CI reprova PR que mexe em caminho público (job `oss-trava`,
+`scripts/oss/trava.mjs`), menos os abertos antes do corte (#723, #725, #698, #677) e os com o rótulo `transicao-nod-485`.
+Merge de um desses: leve ao público com `node scripts/oss/portar.mjs --ref <sha> --publico <clone>` e abra o PR lá.
+Antes de cada push no público: `node scripts/oss/varrer.mjs <clone-do-publico>` (a lista de nomes internos só existe
+aqui). O exportador está aposentado (`--push` recusa); o `varrer-publico.yml` confere a main e os PRs do público a cada
+30 min. A parte fechada mora no `gamefik/nod-fechado`.
+
 **PR rascunho não roda CI** (2026-10-28; a fila do runner próprio tinha 63% de runs cancelados por push novo nas
 frentes). Enquanto o PR é rascunho, confira local com `npm run check` (ou os testes do que mudou) e faça quantos
 pushes quiser. Quando quiser a CI, uma vez, com o trabalho pronto: `gh pr ready <n>` e espere com

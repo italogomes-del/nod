@@ -106,6 +106,32 @@ jobs:
   # concorrência em série) virou quatro jobs em paralelo, cada um com o próprio Postgres (service container na porta
   # que o Docker sorteia: vários na mesma VM). A parede cai para o maior deles (~12 min). `npm run check` local segue
   # rodando tudo em sequência. O service container repete nos quatro: o Actions não aceita âncora YAML.
+  # NOD-485 (ADR-161): o gamefik/nod está congelado; o código aberto mora no marlonwlv/nod. PR que mexe em caminho público
+  # (o que o oss/manifesto.json não exclui) falha, menos os abertos antes do corte (manifesto.travaPermitidos) e os com o
+  # rótulo transicao-nod-485. Sem npm ci: node puro.
+  oss-trava:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          ROTULOS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        # O script e o manifesto vêm do BASE (worktree): o PR não troca a regra que o julga. Base sem o script = o PR que
+        # cria a trava (bootstrap), que usa o do próprio PR.
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+          T="$RUNNER_TEMP/base/scripts/oss/trava.mjs"
+          [ -f "$T" ] || T=scripts/oss/trava.mjs
+          node "$T" --repo "$GITHUB_WORKSPACE" --base "$BASE" --head "$(git rev-parse HEAD)" --pr "$PR" --rotulos "$ROTULOS"
+
   integracao:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: blacksmith-4vcpu-ubuntu-2404
