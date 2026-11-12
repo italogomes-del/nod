@@ -3958,6 +3958,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       subirVersao: soNoPostgres,
       gravarVersao: soNoPostgres,
       versao: async () => null,
+      versoes: async () => [],
       gravarBlobs: soNoPostgres,
       blobs: async () => ({}),
       tamanhoDosBlobs: async () => 0,
