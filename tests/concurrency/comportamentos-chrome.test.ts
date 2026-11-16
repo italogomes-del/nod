@@ -173,10 +173,8 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await seguir(); await noPasso(4);
     await seguir(); await noPasso(5);
     await seguir(); await noPasso(6);
-    // Função: pensa até escolher; escolhida, comemora.
-    expect(await mascote()).toBe("pensando");
+    // Função e origem são as telas de pergunta, sem personagem (Paper 13).
     await avaliar(cdp, `[...document.querySelectorAll(".ap-fichas .ap-ficha")].find((b) => b.textContent === "Produto").click()`);
-    await ate(`document.querySelector(".ap-camada .ap-personagem nod-mascote")?.dataset.estado === "comemorando"`, "o personagem comemorando a função");
     await seguir(); await noPasso(7);
     await avaliar(cdp, `[...document.querySelectorAll(".ap-fichas .ap-ficha")].find((b) => b.textContent === "Amigo ou colega").click()`);
     await seguir(); await noPasso(8);
@@ -447,7 +445,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await buscar("Atalhos Teste", "Bots");
     await buscar("tema", "Ajustes");
     await buscar("Vendas da semana", "Conversas");
-    await buscar("criar", "Ações");
+    await buscar("novo", "Ações");
     // Enter no ajuste leva às Configurações já na linha.
     await buscar("tema", "Ajustes");
     await clicar('.paleta .paleta-grupo[aria-label="Ajustes"] .paleta-item');
@@ -517,7 +515,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 8 ————————————————————————————————————————————————
   it("8. criar bot com cor e forma, e o preparo com %", { timeout: JORNADA }, async () => {
     await abrirApp();
-    await clicar('.create-trigger[data-act="novo-bot-dialogo"]');
+    await avaliar(cdp, `(() => { const b = [...document.querySelectorAll('.create-trigger[data-act="novo-bot-dialogo"]')].find((el) => el.getClientRects().length); if (!b) throw new Error("não achei o Novo bot visível"); b.click(); })()`);
     await ate(`document.querySelector("dialog.criar-bot[open] .cb-nome")`, "o modal Criar novo bot");
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-formas [role=radio][data-forma]').length`)).toBe(13);
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-cores [role=radio][data-cor]').length`)).toBe(14);

@@ -179,6 +179,8 @@ descrever("celular: aviso do Backlog, prioridade, alvos de 44 px e a máquina em
     expect(await avaliar<string[]>(cdp, MEDIR("#quadro"))).toEqual([]);
     // Os popovers da barra (o funil, a pílula de quem trabalha e as Opções), um de cada vez.
     for (const [act, pop] of [["fil-abrir", "#qm-pop-fil"], ["ativos-abrir", "#qm-pop-ativos"], ["op-abrir", "#qm-pop-op"]] as const) {
+      // A barra atual só desenha controles aplicáveis (Opções foi para o menu do quadro; sem participantes, não há pílula).
+      if (!(await avaliar<boolean>(cdp, `!!document.querySelector('#quadro [data-act="${act}"]')`))) continue;
       await clicar(`#quadro [data-act="${act}"]`);
       await ate(`document.querySelector('${pop}')`, `o popover ${pop}`);
       expect(await avaliar<string[]>(cdp, MEDIR(pop))).toEqual([]);
@@ -228,9 +230,9 @@ descrever("celular: aviso do Backlog, prioridade, alvos de 44 px e a máquina em
 
   it("a tarefa que rodou: Repetir e Ver o trabalho com 44 px, e Ver o trabalho diz a máquina", async () => {
     await abrirTarefa("Rodou uma vez");
-    await ate(`document.querySelector('#quadro .qd-tarefa-cel [data-act="run-ver"]') || document.querySelector('#quadro .qd-tarefa-cel [data-act="run-abrir"]')`, "o run da tarefa");
-    const abrirRun = '#quadro .qd-tarefa-cel [data-act="run-abrir"]';
-    if (await avaliar<boolean>(cdp, `!!document.querySelector(${JSON.stringify(abrirRun)})`)) await clicar(abrirRun);
+    const registro = '#quadro .qd-tarefa-cel [data-act="lado-sec"][data-sec="reg"]';
+    await ate(`document.querySelector(${JSON.stringify(registro)})`, "o Registro de execução");
+    if (await avaliar<boolean>(cdp, `document.querySelector(${JSON.stringify(registro)}).getAttribute("aria-expanded") !== "true"`)) await clicar(registro);
     await ate(`document.querySelector('#quadro .qd-tarefa-cel [data-act="run-ver"]')`, "o bloco do run com Ver o trabalho");
     expect(await avaliar<string[]>(cdp, MEDIR("#quadro .qd-tarefa-cel"))).toEqual([]);
     await clicar('#quadro .qd-tarefa-cel [data-act="run-ver"]');
