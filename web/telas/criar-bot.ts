@@ -1,4 +1,6 @@
 import type { CorAgente, FormaAgente } from "../../src/contracts/agente.ts";
+export { COR_PADRAO, FORMA_PADRAO, NOME_MAX } from "../lib/aparencia-do-bot.ts";
+import { NOME_MAX } from "../lib/aparencia-do-bot.ts";
 import { esc, iconeAgente } from "../lib/render.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE, NOME_DA_COR, NOME_DA_FORMA, type EstadoMascote } from "../lib/mascote.ts";
 import { ErroDoPreparo, novoPreparo, rodarPreparo, subtituloDoPreparo, tique, type EstadoPreparo, type EtapasDoPreparo } from "../lib/preparo.ts";
@@ -11,10 +13,6 @@ import { ErroDoPreparo, novoPreparo, rodarPreparo, subtituloDoPreparo, tique, ty
  *
  * As partes de desenho (seletores, prévia, preparo) são puras e servem também ao onboarding (passos 9 e 10).
  */
-
-export const COR_PADRAO: CorAgente = "c-blue";
-export const FORMA_PADRAO: FormaAgente = "shape-pebble";
-export const NOME_MAX = 40;
 
 /**
  * Tela 09 do Paper: o seletor mostra 8 formas e 12 cores, nesta ordem. As outras continuam válidas (bots antigos, a

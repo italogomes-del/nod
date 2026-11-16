@@ -332,7 +332,7 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
     expect(q).toMatchObject({ mais: "block", clipe: "none", pilEsq: "52px", enviarBorda: "solid true", enviarFundo: "rgba(0, 0, 0, 0)", enviarLargura: 46, clipeLargura: 46, act: "anexar" });
   }, 90_000);
 
-  it("1280: o computador fica como era — sem +, caixa com borda própria, card cheio — e o ⋯ ganha Criar tarefa disto", async () => {
+  it("1280: o computador mantém caixa e card próprios, com + e Criar tarefa disto no ⋯", async () => {
     const bot = await criarBot("Mesa F5");
     await abrir(1280, 800);
     await abrirConversa(bot);
@@ -340,7 +340,7 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
     const mesa = await avaliar<{ mais: string; caixaBorda: string; antes: string; cardFundo: string }>(cdp, `(() => { const box = document.querySelector(".composer .box");
       return { mais: getComputedStyle(box.querySelector(".mais-campo")).display, caixaBorda: getComputedStyle(box).borderTopWidth, antes: getComputedStyle(box, "::before").content,
         cardFundo: getComputedStyle(document.querySelector("#timeline .cp .cp-sim")).backgroundColor }; })()`);
-    expect(mesa.mais).toBe("none");
+    expect(mesa.mais).toBe("grid");
     expect(mesa.caixaBorda).not.toBe("0px");
     expect(mesa.antes).toBe("none");
     expect(mesa.cardFundo).not.toBe("rgba(0, 0, 0, 0)");
