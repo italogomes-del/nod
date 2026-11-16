@@ -2308,7 +2308,7 @@ function renderSidebar(estado: Estado): string {
     return `<div class="inicio-topo">
       <button class="me me-topo${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}</button>
       ${renderTituloCompacto(abaDoInicio)}
-      <span class="inicio-topo-acoes">${renderIconeTrabalhos(estado)}<button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">${MAIS}</button></span>
+      <span class="inicio-topo-acoes">${renderIconeTrabalhos(estado)}<button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)"><span class="segurar-anel" aria-hidden="true"></span>${MAIS}</button></span>
     </div>
     ${renderIncidentes(estado)}
     ${ambiente}
