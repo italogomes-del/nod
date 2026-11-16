@@ -317,6 +317,25 @@ describe("seletor de provedor (o DriverComputador de sempre)", () => {
     await expect(driver.iniciar(ID, ESCOPO)).rejects.toMatchObject({ motivo: "nao_iniciou" });
     expect((await driver.estado(ID, ESCOPO)).disponivel).toBe(false);
   });
+
+  it("usa o mesmo contrato vivo: Orgo abre o relay privado; Docker recusa e deixa a web cair para capturas", async () => {
+    const eventos: string[] = [];
+    const acessoTela = vi.fn(async () => ({ tipo: "vnc_websocket" as const, url: "wss://www.orgo.ai/desktops/pc/ws/websockify", token: "segredo", validoAte: null }));
+    const orgo = { ...provedorFalso("orgo", eventos), capacidades: { ...provedorFalso("orgo", eventos).capacidades, telaAoVivo: "vnc_websocket" as const }, acessoTela };
+    const origem = { enviar: vi.fn(), aoDados: vi.fn(), aoFechar: vi.fn(), fechar: vi.fn() };
+    const abrirVivo = vi.fn(async () => origem);
+    const anexarVivo = vi.fn(() => true);
+    const config = { padrao: null, global: "orgo" as const, porPessoa: {}, porBot: {} };
+    const driver = criarDriverPorProvedor({ config, provedores: { orgo }, agenteDe: async () => BOT, abrirVivo, anexarVivo });
+    await driver.vivo!(ID, { sessao: "s", token: "t" }, ESCOPO);
+    expect(acessoTela).toHaveBeenCalledWith({ id: ID, escopo: ESCOPO });
+    expect(abrirVivo).toHaveBeenCalledWith(expect.objectContaining({ token: "segredo" }));
+    expect(anexarVivo).toHaveBeenCalledWith("s", "t", origem);
+
+    const local = criarDriverPorProvedor({ config: { ...config, global: "docker" }, provedores: { docker: provedorFalso("docker", eventos) }, agenteDe: async () => BOT, abrirVivo, anexarVivo });
+    await expect(local.vivo!(ID, { sessao: "s", token: "t" }, ESCOPO)).rejects.toMatchObject({ motivo: "nao_iniciou" });
+    expect(abrirVivo).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Docker como provedor", () => {

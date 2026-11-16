@@ -747,8 +747,11 @@ export function comporApp(o: OpcoesCompor): App {
     chavesDasMaquinas.set(maquinaId, chave);
     barramento.publicar(escopo.pessoaId, "computador.estado", dados);
   } }) : null;
-  // NOD-95 (ADR-138): as sessões da tela ao vivo, só com o computador no motor.
-  const sessoesVivo = computadorNoMotor ? criarSessoesVivo() : null;
+  // Computador ao vivo: o mesmo relay público atende o motor local e provedores externos com VNC WebSocket. Docker sem
+  // VNC continua na mesma sala e cai com segurança para capturas; não se monta uma rota inútil quando nenhum deles existe.
+  const configProvedoresLida = !o.computador && !computadorNoMotor ? configDeProvedores(env) : null;
+  const temVivoExterno = configProvedoresLida ? provedoresEmUso(configProvedoresLida.config).includes("orgo") : false;
+  const sessoesVivo = computadorNoMotor || temVivoExterno ? criarSessoesVivo() : null;
   const driverMotor = canalComputador ? criarDriverMotor({
     env,
     canal: canalComputador,
@@ -804,7 +807,7 @@ export function comporApp(o: OpcoesCompor): App {
    */
   const provedoresComputador = (() => {
     if (o.computador || driverMotor) return null;
-    const { config, avisos } = configDeProvedores(env);
+    const { config, avisos } = configProvedoresLida ?? configDeProvedores(env);
     for (const aviso of avisos) log("aviso", "computador_provedor_config", { aviso });
     const emUso = provedoresEmUso(config);
     if (!emUso.length) return null;
@@ -816,7 +819,8 @@ export function comporApp(o: OpcoesCompor): App {
       const lido = JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, unknown>;
       return typeof lido.ORGO_API_KEY === "string" && lido.ORGO_API_KEY ? lido.ORGO_API_KEY : null;
     }) });
-    return { config, driver: criarDriverPorProvedor({ config, provedores, agenteDe: (id, escopo) => dentro(escopo, (d) => d.repos.computadores.agenteDoComputador(id)) }) };
+    return { config, driver: criarDriverPorProvedor({ config, provedores, agenteDe: (id, escopo) => dentro(escopo, (d) => d.repos.computadores.agenteDoComputador(id)),
+      ...(sessoesVivo ? { anexarVivo: (sessao, token, origem) => sessoesVivo.anexarMotor(sessao, token, origem) } : {}) }) };
   })();
   const computadores = criarComputadores({ dentro, driver: o.computador ?? driverMotor ?? provedoresComputador?.driver ?? criarDriverDocker(env), executor: () => executorAtual,
     porPessoa: computadorNoMotor,
