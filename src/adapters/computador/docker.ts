@@ -85,10 +85,19 @@ export function abrirVncDocker(id: string, spawnImpl: SpawnVnc = spawn): Promise
   if (!/^[a-f0-9-]{36}$/.test(id)) return Promise.reject(new ErroDeDominio("entrada_invalida"));
   const p = spawnImpl("docker", ["exec", "-i", `nod-computador-${id}`, "node", "/opt/nod/vnc-bridge.mjs"], { stdio: ["pipe", "pipe", "pipe"] });
   let dados: ((bytes: Uint8Array) => void) | null = null;
+  let pendentes = Buffer.alloc(0);
   let fechou: (() => void) | null = null;
   let encerrado = false;
   const encerrar = (matar = false) => { if (encerrado) return; encerrado = true; if (matar) p.kill("SIGTERM"); fechou?.(); };
-  p.stdout.on("data", (b: Buffer) => dados?.(b));
+  p.stdout.on("data", (b: Buffer) => {
+    if (encerrado) return;
+    if (dados) return void dados(b);
+    // O socket Unix envia o greeting RFB assim que o `docker exec` conecta, antes de o seletor conseguir parear a
+    // origem com a sessão. Guardar esse começo evita uma conexão muda; o mesmo teto fecha um processo que produza sem
+    // consumidor em vez de transformar a janela de pareamento em memória sem limite.
+    if (pendentes.length + b.length > VNC_DOCKER_FILA_MAX_BYTES) return encerrar(true);
+    pendentes = Buffer.concat([pendentes, b]);
+  });
   // O bridge fecha stdout quando o socket Unix do x11vnc cai. O `docker exec -i` pode continuar esperando stdin;
   // tratar `end` e matá-lo garante que a sessão saiba da queda e a web reconecte/caia para capturas.
   p.stdout.on("end", () => encerrar(true));
@@ -108,7 +117,10 @@ export function abrirVncDocker(id: string, spawnImpl: SpawnVnc = spawn): Promise
       }
       p.stdin.write(Buffer.from(bytes));
     },
-    aoDados(fn) { dados = fn; },
+    aoDados(fn) {
+      dados = fn;
+      if (pendentes.length) { const inicio = pendentes; pendentes = Buffer.alloc(0); fn(inicio); }
+    },
     aoFechar(fn) { fechou = fn; if (encerrado) queueMicrotask(fn); },
     fechar() { if (encerrado) return; p.stdin.end(); p.kill("SIGTERM"); encerrar(); },
   });

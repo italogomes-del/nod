@@ -60,6 +60,31 @@ describe("VNC contínuo do Docker", () => {
     expect(fechou).toHaveBeenCalledOnce();
   });
 
+  it("preserva o greeting que o x11vnc envia antes do pareamento", async () => {
+    const f = processoFalso();
+    const fluxo = await abrirVncDocker(ID, f.spawn);
+    f.stdout.emit("data", Buffer.from("RFB 003.008\n"));
+    f.stdout.emit("data", Buffer.from([1, 1]));
+
+    const dados = vi.fn();
+    fluxo.aoDados(dados);
+
+    expect(dados).toHaveBeenCalledOnce();
+    expect(dados).toHaveBeenCalledWith(Buffer.concat([Buffer.from("RFB 003.008\n"), Buffer.from([1, 1])]));
+  });
+
+  it("fecha o processo se a saída anterior ao pareamento passa do teto", async () => {
+    const f = processoFalso();
+    const fluxo = await abrirVncDocker(ID, f.spawn);
+    const fechou = vi.fn();
+    fluxo.aoFechar(fechou);
+    f.stdout.emit("data", Buffer.alloc(VNC_DOCKER_FILA_MAX_BYTES));
+    f.stdout.emit("data", Buffer.from([1]));
+
+    expect(f.processo.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(fechou).toHaveBeenCalledOnce();
+  });
+
   it("prova web → relay escopado → docker exec → VNC nos dois sentidos", async () => {
     const f = processoFalso();
     const origemDocker = await abrirVncDocker(ID, f.spawn);
