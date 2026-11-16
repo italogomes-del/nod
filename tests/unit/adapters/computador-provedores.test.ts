@@ -465,6 +465,19 @@ describe("seletor de provedor (o DriverComputador de sempre)", () => {
     expect(eventos).toEqual([`docker:iniciar:${ID}`, `docker:parar:${ID}`, `orgo:iniciar:${ID}`]);
   });
 
+  it("display externo ligado entra na foto do varredor de ociosidade até ser parado", async () => {
+    const eventos: string[] = [];
+    const orgo = { ...provedorFalso("orgo", eventos), ligados: async () => new Set<string>() };
+    const { config } = configDeProvedores({ NOD_COMPUTADOR_PROVEDOR: "orgo" });
+    const driver = criarDriverPorProvedor({ config, provedores: { orgo }, agenteDe: async () => BOT });
+
+    await driver.iniciar(ID, ESCOPO);
+    expect(await driver.ligados()).toEqual(new Set([ID]));
+
+    await driver.parar(ID, ESCOPO);
+    expect(await driver.ligados()).toEqual(new Set());
+  });
+
   it("provedor escolhido e não montado: falha fechada, sem cair em outro", async () => {
     const config = { padrao: null, global: "orgo" as const, porPessoa: {}, porBot: {} };
     const driver = criarDriverPorProvedor({ config, provedores: { docker: provedorFalso("docker", []) }, agenteDe: async () => null });

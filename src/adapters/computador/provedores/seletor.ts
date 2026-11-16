@@ -39,7 +39,7 @@ export function criarDriverPorProvedor(o: OpcoesSeletor): DriverPorProvedor {
     if (!p.executar && !p.primitivas) throw new Error(`provedor ${id} sem plano de dados (executar ou primitivas)`);
   }
   /** Quem ligou cada computador neste processo (para desligar no antigo quando a escolha muda). */
-  const ligadoEm = new Map<string, IdProvedorComputador>();
+  const ligadoEm = new Map<string, { id: string; provedor: IdProvedorComputador }>();
   const chaveDe = (id: string, escopo?: Escopo) => escopo ? `${escopo.tenantId}:${escopo.pessoaId}:${id}` : `sem-escopo:${id}`;
 
   async function escolher(id: string, escopo?: Escopo): Promise<IdProvedorComputador | null> {
@@ -79,19 +79,20 @@ export function criarDriverPorProvedor(o: OpcoesSeletor): DriverPorProvedor {
       const p = await provedorDe(id, escopo);
       const chave = chaveDe(id, escopo);
       const antes = ligadoEm.get(chave);
-      if (antes && antes !== p.id) {
-        log("info", "computador_provedor_trocado", { computador_id: id, de: antes, para: p.id });
-        await o.provedores[antes]?.parar(ref(id, escopo)).catch(() => undefined);
+      if (antes && antes.provedor !== p.id) {
+        log("info", "computador_provedor_trocado", { computador_id: id, de: antes.provedor, para: p.id });
+        await o.provedores[antes.provedor]?.parar(ref(id, escopo)).catch(() => undefined);
+        ligadoEm.delete(chave);
       }
       await p.iniciar(ref(id, escopo));
-      ligadoEm.set(chave, p.id);
+      ligadoEm.set(chave, { id, provedor: p.id });
     },
     async parar(id, escopo) {
       const p = await provedorDe(id, escopo);
       await p.parar(ref(id, escopo));
       const chave = chaveDe(id, escopo);
       const antes = ligadoEm.get(chave);
-      if (antes && antes !== p.id) await o.provedores[antes]?.parar(ref(id, escopo)).catch(() => undefined);
+      if (antes && antes.provedor !== p.id) await o.provedores[antes.provedor]?.parar(ref(id, escopo)).catch(() => undefined);
       ligadoEm.delete(chave);
       executores.get(p.id)?.esquecer(ref(id, escopo));
     },
@@ -110,6 +111,10 @@ export function criarDriverPorProvedor(o: OpcoesSeletor): DriverPorProvedor {
     async ligados() {
       const todos = new Set<string>();
       for (const p of Object.values(o.provedores)) for (const id of await p.ligados().catch(() => new Set<string>())) todos.add(id);
+      // Provedores externos não podem listar máquinas sem o escopo/chave da pessoa, mas o varredor de ociosidade usa
+      // esta foto global antes de percorrer os escopos. Guarde também o que este processo ligou para o custo remoto não
+      // escapar do mesmo desligamento automático do Docker. `parar` é idempotente e remove a marca.
+      for (const ligado of ligadoEm.values()) todos.add(ligado.id);
       return todos;
     },
   };
