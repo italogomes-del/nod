@@ -722,6 +722,9 @@
   .cfg-celular .lc-switch::before { inset: -12px -5px; }
   .cfg-celular .lc-seletor { min-height: 44px; max-width: 46vw; }
   .cfg-celular .lc-link { min-height: 52px; }
+  /* QA 2026-11-16: Agentes tem o menu em cada linha e Restaurar nos excluídos; os dois precisam do alvo inteiro de toque. */
+  .cfg-celular .cfg-bot .cl-mais-bt { width: 44px; height: 44px; }
+  .cfg-celular .cfg-bot [data-act="restaurar-agente"] { min-height: 44px; }
 
   /* Feedback: o Enviar fica embaixo, à vista, logo acima do teclado (a coluna segue --altura-visivel). */
   .cfg-celular .cfg-fb { display: flex; flex-direction: column; min-height: 100%; }
