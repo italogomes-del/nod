@@ -564,7 +564,9 @@
 .pensar-lista { margin: 4px 0 2px; padding: 0 0 0 12px; border-left: 2px solid var(--line); list-style: none; line-height: 22px; font-size: var(--fs-corpo-2); color: var(--ink-2); }
 .pensar-nota { color: var(--ink-2); }
 /* Paper 05b (casca, rodada 4): a narração de abertura do turno vivo, antes do pensamento, como texto da fala. */
-.fala-narracao { margin: 0 0 16px; font-size: var(--fs-corpo); line-height: var(--lh-conversa); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Ao terminar, a narração volta para a lista do pensamento. Os 14 px igualam a altura desse bloco à lista aberta e
+   impedem o balão de subir 2 px na troca da fala viva pela gravada (inclusive com fonte/token da casca). */
+.fala-narracao { margin: 0 0 14px; font-size: var(--fs-corpo); line-height: var(--lh-conversa); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .fala-narracao > p { margin: 0; }
 .fala-narracao > p + p { margin-top: 6px; }
 .pensar-acao { display: flex; gap: 8px; align-items: center; }

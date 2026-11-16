@@ -356,7 +356,8 @@ function irAoAjuste(id: string): void {
   // O link de fora (ou a paleta) leva à linha mesmo com uma busca aberta nas Configurações: a busca sai.
   termoAjustes = "";
   abrirEspaco(a.secao);
-  // A seção que carrega depois (Aprovações) desenha a linha quando os dados chegam: procura por até ~3 s.
+  // A seção que carrega depois (Aprovações) desenha a linha quando os dados chegam. As linhas condicionais (time e apps)
+  // dependem de mais de uma leitura; em máquina ocupada, 3 s acabavam antes delas e o link profundo não era aplicado.
   // O redesenho da seção que acabou de carregar troca o nó: o realce é reposto na linha nova até o fim dele.
   const manterRealce = (ate: number): void => {
     if (Date.now() >= ate) { document.getElementById(`ajuste-${a.id}`)?.classList.remove("realce"); return; }
@@ -367,7 +368,7 @@ function irAoAjuste(id: string): void {
     const linha = document.getElementById(`ajuste-${a.id}`);
     if (linha) { levarAo(linha); manterRealce(Date.now() + REALCE_MS); } else if (resta > 0) setTimeout(() => procurar(resta - 1), 100);
   };
-  requestAnimationFrame(() => procurar(30));
+  requestAnimationFrame(() => procurar(100));
 }
 /** ADR-168: o que as Configurações leem do design system novo (balão, sons e a busca dos ajustes). */
 function extrasDoDs(): { balaoCor: boolean; sons: ReturnType<typeof lerSons>; buscaAjustes: string } {
