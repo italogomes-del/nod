@@ -304,6 +304,8 @@ button.cv-nota { cursor: pointer; }
 @media (max-width: 760px) {
   .cv-topo { left: 12px; right: 12px; top: 66px; }
   .cv-menu-ver { margin-left: 0; }
+  .cv-filtros { flex-wrap: wrap; }
+  .cv-filtro { min-height: 44px; border-radius: 22px; }
   .cv-lin-a { grid-template-columns: 72px minmax(0, 1fr); }
   .cv-lin-mini { width: 72px; height: 46px; }
   .cv-lin-est, .cv-lin-a time { grid-column: 2; }
