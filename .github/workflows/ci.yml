@@ -68,6 +68,8 @@ jobs:
     env:
       GITLEAKS_VERSAO: "8.28.0"
       GITLEAKS_SHA256: a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
+      # O snapshot aberto inteiro já encosta no heap padrão (~2 GB) do Node 24 durante o typecheck.
+      NODE_OPTIONS: "--max-old-space-size=3072"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: gitleaks (pinado)

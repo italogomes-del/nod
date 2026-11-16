@@ -358,7 +358,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const timesEmMemoria = timesDoBanco(b, `${escopo.tenantId}:${escopo.pessoaId}`);
   const repos = {
     computadores: {
-      buscarVinculo: async () => null, buscarDoAgente: async () => undefined,
+      buscarVinculo: async () => null, buscarDoAgente: async () => undefined, agenteDoComputador: async () => null,
       obter: async () => null, travar: async () => null, configurar: async () => undefined,
       ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [], ociosos: async () => [], emUsoPor: async () => null,
       buscarAcao: async () => null, concluir: async () => undefined,

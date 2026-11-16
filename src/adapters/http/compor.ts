@@ -9,8 +9,14 @@ import type { ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { PlataformaMaquina } from "../../contracts/ponte.ts";
 import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
+import { criarProvedorDocker } from "../computador/provedores/docker.ts";
+import { criarProvedorOrgo } from "../computador/provedores/orgo.ts";
+import { criarDriverPorProvedor } from "../computador/provedores/seletor.ts";
+import type { IdProvedorComputador, ProvedorDeComputador } from "../../contracts/provedor-computador.ts";
+import { configDeProvedores, provedoresEmUso } from "../../domain/provedor-computador.ts";
 import { criarCanalComputador } from "../computador/canal.ts";
 import { criarSessoesVivo } from "../computador/vivo.ts";
+import { conectarVivoDoProvedor } from "../computador/vivo-provedor.ts";
 import { criarDriverMotor } from "../computador/motor.ts";
 import { lugarPadrao } from "../../domain/computador-canal.ts";
 import type { EstadoComputadorRelatado } from "../../contracts/computador-motor.ts";
@@ -719,8 +725,8 @@ export function comporApp(o: OpcoesCompor): App {
    */
   const computadorNoMotor = !o.computador && env.NOD_COMPUTADORES === "motor";
   const canalComputador = computadorNoMotor ? criarCanalComputador({ agora: relogio }) : null;
-  // NOD-95 (ADR-138): as sessões da tela ao vivo, só com o computador no motor.
-  const sessoesVivo = computadorNoMotor ? criarSessoesVivo() : null;
+  // NOD-498: o mesmo relay serve ao motor e ao Orgo; a flag externa mantém a rota ausente quando o provedor está fora.
+  const sessoesVivo = computadorNoMotor || env.NOD_COMPUTADOR_ORGO === "1" ? criarSessoesVivo() : null;
   const driverMotor = canalComputador ? criarDriverMotor({
     env,
     canal: canalComputador,
@@ -769,14 +775,35 @@ export function comporApp(o: OpcoesCompor): App {
     }
     if (desfecho === "diferente") log("aviso", "computador_supervisor_diferente", { computador_id: relato.computadorId, maquina_id: maquinaId });
   }
-  const computadores = criarComputadores({ dentro, driver: o.computador ?? driverMotor ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
+  /**
+   * ADR-170 (NOD computador plug and play): fora do motor, o computador do bot vem de um PROVEDOR escolhido por
+   * configuração (bot > pessoa > global > NOD_COMPUTADORES=docker). Só NOD_COMPUTADORES=docker monta o mesmo Docker de
+   * antes; o Orgo só existe com NOD_COMPUTADOR_ORGO=1 e a chave da pessoa vem do cofre (conector `orgo`, ORGO_API_KEY).
+   */
+  const provedoresComputador = (() => {
+    if (o.computador || driverMotor) return null;
+    const { config, avisos } = configDeProvedores(env);
+    for (const aviso of avisos) log("aviso", "computador_provedor_config", { aviso });
+    const emUso = provedoresEmUso(config);
+    if (!emUso.length) return null;
+    const provedores: Partial<Record<IdProvedorComputador, ProvedorDeComputador>> = {};
+    if (emUso.includes("docker")) provedores.docker = criarProvedorDocker(env);
+    if (emUso.includes("orgo")) provedores.orgo = criarProvedorOrgo({ env, chaveDe: (escopo) => dentro(escopo, async (d) => {
+      const c = await d.repos.conectores.buscarPorSlug("orgo");
+      if (!c?.envCifrado) return null;
+      const lido = JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, unknown>;
+      return typeof lido.ORGO_API_KEY === "string" && lido.ORGO_API_KEY ? lido.ORGO_API_KEY : null;
+    }) });
+    return { config, driver: criarDriverPorProvedor({ config, provedores, agenteDe: (id, escopo) => dentro(escopo, (d) => d.repos.computadores.agenteDoComputador(id)) }) };
+  })();
+  const computadores = criarComputadores({ dentro, driver: o.computador ?? driverMotor ?? provedoresComputador?.driver ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
     porPessoa: computadorNoMotor,
     ...(sessoesVivo ? { vivo: sessoesVivo } : {}),
     lugarPadraoNaCriacao: computadorNoMotor ? (escopo) => lugarPadrao(ponteHttp.maquinasComComputador(escopo)) : undefined,
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
     mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });
-  if (o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor) services.computadores = computadores;
+  if (o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor || provedoresComputador) services.computadores = computadores;
   rodarAposCommit = async (escopo, efeito) => {
     if (efeito.tipo === "desligar_computador") return computadores.desligarExcluido(escopo, efeito.agenteId);
     if (efeito.tipo === "remover_computador") return removerDepoisDoCommit(escopo, efeito);
@@ -1697,7 +1724,7 @@ export function comporApp(o: OpcoesCompor): App {
     services,
     useCases,
     dentro,
-    computadores: o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor ? computadores : null,
+    computadores: o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor || provedoresComputador ? computadores : null,
     disjuntor,
     depsDe,
     ponte,
@@ -1757,7 +1784,15 @@ export function comporApp(o: OpcoesCompor): App {
         ...(sessoesVivo ? { computadorVivo: {
           web(escopo, agenteId, canal) {
             const s = sessoesVivo.abrir({ escopo, agenteId, web: canal, conferir: () => computadores.vivoAindaPode(escopo, agenteId) });
-            computadores.vivo(escopo, agenteId, { sessao: s.sessao, token: s.token }).catch((e: unknown) => {
+            computadores.acessoVivo(escopo, agenteId).then(async (acesso) => {
+              if (!acesso) return computadores.vivo(escopo, agenteId, { sessao: s.sessao, token: s.token });
+              const provedor = await conectarVivoDoProvedor(acesso);
+              if (!(await sessoesVivo.autorizarPareamento(s.sessao, s.token))) {
+                provedor.fechar(1000, "controle mudou");
+                return;
+              }
+              if (!sessoesVivo.anexarMotor(s.sessao, s.token, provedor)) provedor.fechar(1000, "sessão encerrada");
+            }).catch((e: unknown) => {
               const motivo = e instanceof ErroDeDominio ? e.codigo : ehFalhaComputador(e) ? e.motivo : "acao_falhou";
               const causa = e instanceof Error && e.cause !== undefined ? String(e.cause) : null;
               log("aviso", "computador_vivo_recusado", { agente_id: agenteId, motivo, causa });

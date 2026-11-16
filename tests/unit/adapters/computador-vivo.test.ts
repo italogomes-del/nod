@@ -121,4 +121,15 @@ describe("sessões da tela ao vivo", () => {
     expect(depois.fechamentos).toEqual([[FECHAMENTOS_VIVO.trocou, "o controle mudou"]]);
     expect(s.abertas()).toEqual([]);
   });
+
+  it("provedor lento reconfere a autorização antes de liberar qualquer byte da tela", async () => {
+    const s = criarSessoesVivo();
+    const web = lado();
+    const a = s.abrir({ escopo: ESCOPO, agenteId: "a1", web: web.l, conferir: async () => false });
+    const motor = lado();
+    expect(await s.autorizarPareamento(a.sessao, a.token)).toBe(false);
+    expect(s.anexarMotor(a.sessao, a.token, motor.l)).toBe(false);
+    motor.chegou(new Uint8Array([1, 2, 3]));
+    expect(web.recebidos).toEqual([]);
+  });
 });

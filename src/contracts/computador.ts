@@ -1,6 +1,7 @@
 import type { EpochMs } from "./ids.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { VmLocalAnunciada } from "./vm-local.ts";
+import type { AcessoTelaAoVivo } from "./provedor-computador.ts";
 
 export type ControleComputador = "bot" | "pessoa" | "aguardando_pessoa";
 export type PoliticaComputador = "supervisionado" | "autonomo";
@@ -154,6 +155,8 @@ export interface DriverComputador {
    * WebSocket de volta ao servidor com `sessao` e `token`; resolve quando o supervisor aceitou (o fluxo chega em seguida).
    */
   vivo?(id: string, sessao: { sessao: string; token: string }, escopo?: EscopoDoDriver): Promise<void>;
+  /** Provedor externo: acesso efêmero que o servidor transforma no mesmo relay VNC da web; o token nunca vai ao navegador. */
+  acessoTelaAoVivo?(id: string, escopo?: EscopoDoDriver): Promise<AcessoTelaAoVivo>;
   /**
    * NOD-365: muda o computador para a máquina `destinoId`, levando a loja de logins cifrada (sem `semLogins`), liga lá e
    * marca a pasta da origem para sair em 30 dias. Se o `iniciar` no destino falhar, o banco volta a apontar para a origem.

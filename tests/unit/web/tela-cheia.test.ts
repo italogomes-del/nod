@@ -40,7 +40,7 @@ class El {
   getBoundingClientRect() { return { left: 0, top: 0, width: 1280, height: 800 }; }
 }
 
-let doc: { activeElement: El | null; hidden: boolean; body: { append: (e: El) => void }; createElement: () => El; querySelector: () => null };
+let doc: { activeElement: El | null; hidden: boolean; body: { append: (e: El) => void }; createElement: () => El; querySelector: () => El | null };
 let dialog: El;
 
 type Pendente = { resolver: (v?: unknown) => void; promessa: Promise<unknown> };
@@ -91,6 +91,25 @@ afterEach(() => vi.unstubAllGlobals());
 const BOT = { id: "a", nome: "Dev 2" };
 
 describe("tela cheia v2: fechar devolve ao bot", () => {
+  it("trocar de bot fecha o stream anterior e uma leitura tardia não troca a identidade nem a imagem", async () => {
+    const a = api("bot");
+    const b = api("bot");
+    const leituraA = a.segurarLeitura();
+    abrirTelaCheia(a as never, { id: "a", nome: "Ada" }, { vivo: semVivo });
+    const dialogA = dialog;
+    expect(dialogA.attrs["aria-label"]).toBe("Tela de Ada");
+    doc.querySelector = () => dialogA;
+    abrirTelaCheia(b as never, { id: "b", nome: "Gil" }, { vivo: semVivo });
+    const dialogB = dialog;
+    await esvaziar();
+    expect(dialogB.attrs["aria-label"]).toBe("Tela de Gil");
+    expect(b.computador).toHaveBeenCalled();
+    leituraA.resolver();
+    await esvaziar();
+    expect(a.acaoComputador).not.toHaveBeenCalled();
+    expect(dialogB.querySelector(".cb-tela-vista > img").src).toBe("data:image/png;base64,AA");
+  });
+
   it("fechar com a pessoa no controle devolve", async () => {
     const a = api("pessoa");
     abrirTelaCheia(a as never, BOT, { vivo: semVivo });

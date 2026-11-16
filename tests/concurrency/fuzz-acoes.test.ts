@@ -105,8 +105,7 @@ const ISENCOES_DE_ACOES_NOVAS: Readonly<Record<string, string>> = {
   // ADA-289 (PR #723): apagar comentário do quadro só leva ids (tarefa e comentário), sem corpo para barrar antes da busca;
   // o fuzz não semeia comentário de tarefa. Semear as entidades do quadro é da NOD-409 (ADA-55).
   "quadro.apagar_comentario": "NOD-409",
-  // PR #9 (ADA-283, semente 3758063732): remover label só leva o nome da label, e o fuzz não semeia labels do quadro; a
-  // semente desta árvore nunca sorteia um nome que exista. Semear as entidades do quadro é da NOD-409 (ADA-55).
+  // ADA-289 (PR #723): remover label também só leva o id e o fuzz ainda não semeia labels do quadro.
   "quadro.remover_label": "NOD-409",
 };
 /** As ações do quadro que a NOD-420 mudou (o prazo_min): no PR levam as N entradas; as outras do quadro, metade. */
@@ -227,12 +226,6 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // NOD-417: uma tarefa (em Backlog, sem acionar ninguém) para o `:tid` (`quadro.terminei` só passava da busca com ela).
       const comTarefa = await srv.json<{ quadro: { tarefas: { id: string; titulo: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/tarefas`, { titulo: "Tarefa do fuzz", status: "backlog" });
       const tarefaDoFuzz = comTarefa.quadro.tarefas.find((t) => t.titulo === "Tarefa do fuzz")!.id;
-      // 0161: duas labels para o `:lid` (sem elas, `quadro.remover_label` só passava do 404 na semente em que um
-      // `criar_label` sorteado vinha antes ou um nome sorteado batia; o PR #725 ficou vermelho local com a semente
-      // 842480849). Uma para remover, outra para editar: o remover de uma não deixa o editar só com 404.
-      const labelDoFuzz = async (nome: string) => (await srv.json<{ quadro: { labels?: { id: string; nome: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/labels`, { nome })).quadro.labels!.find((l) => l.nome === nome)!.id;
-      const labelQueSai = await labelDoFuzz("Label do fuzz");
-      const labelQueFica = await labelDoFuzz("Label do fuzz 2");
       // Um movimento desfazível da tarefa do fuzz para o `:mid` (`quadro.desfazer_movimento` só passava da busca na semente
       // em que um id quebrado caía no `:mid`; o #630 ficou vermelho com a semente 1563796334, os 10 casos em 404).
       const movimentoDoFuzz = await srv.app.dentro({ tenantId: sessao.tenantId, pessoaId: sessao.pessoaId }, (d) =>
@@ -291,8 +284,6 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // `acessos.desfazer_lote` (`/acessos/lotes/:id/desfazer`) passar da busca; sem o lote, o id sorteado só dava 404.
       const conectorDoFuzz = await conectorDe(sessao, `fuzz-${config.nome.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
       const loteDoFuzz = (await srv.json<{ lote_id: string }>("POST", `conectores/${conectorDoFuzz.id}/acessos/lote`, { nivel: "leitura", bots: [meu.agente.id], chave: `fuzz:${randomUUID()}` })).lote_id;
-      // ADA-205 (ADR-166): um token MCP da pessoa, para o `mcp.revogar_token` (`/mcp/tokens/:id`) passar da busca.
-      const tokenDoFuzz = (await srv.json<{ dados: { id: string } }>("POST", "mcp/tokens", { nome: "Token do fuzz" })).dados.id;
       // O app instalado, para o `canvas.dar_acesso` (`/canvas/app/acessos/:bot`) passar da guarda "instale antes".
       await srv.json("PUT", "canvas/app", {});
       const plano = planoDoServidor({
@@ -313,7 +304,6 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             colunas: { daPessoa: [colunaDoFuzz, "voce", "cancelado"], deOutraPessoa: [] },
             tarefas: { daPessoa: [tarefaDoFuzz], deOutraPessoa: [] },
             movimentos: { daPessoa: [movimentoDoFuzz], deOutraPessoa: [] },
-            labels: { daPessoa: [labelQueFica, labelQueSai], deOutraPessoa: [] },
             pessoas: { daPessoa: [outraEscopo.pessoaId], deOutraPessoa: [] },
             apps: { daPessoa: [meuApp, meuAppRemovido], deOutraPessoa: [appDela] },
             times: { daPessoa: [timeDoFuzz, semTimeDoFuzz], deOutraPessoa: [timeDela] },
@@ -325,7 +315,6 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             projetos: { daPessoa: [projetoDoFuzz], deOutraPessoa: [] },
             lotes: { daPessoa: [loteDoFuzz], deOutraPessoa: [] },
             conectores: { daPessoa: [conectorDoFuzz.id], deOutraPessoa: [] },
-            tokens: { daPessoa: [tokenDoFuzz], deOutraPessoa: [] },
           },
         },
       });
@@ -368,7 +357,6 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             "quadro.editar_projeto": { caminho: `/projetos/${projetoDoFuzz}`, corpo: { nome: "Projeto do fuzz" } },
             "quadro.arquivar_projeto": { caminho: `/projetos/${projetoDoFuzz}/arquivar`, corpo: null },
             "quadro.restaurar_projeto": { caminho: `/projetos/${projetoDoFuzz}/restaurar`, corpo: null },
-            "quadro.remover_label": { caminho: `/agentes/${meu.agente.id}/quadro/labels/${encodeURIComponent(labelQueSai)}`, corpo: null },
           };
           const valido = validoDaAda14[c.acao];
           if (valido && n === 1) enxuto.push({ ...c, caminho: valido.caminho, entrada: { rotulo: "base plausível", corpo: valido.corpo === null ? null : JSON.stringify(valido.corpo) } });
@@ -390,7 +378,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         plano.casos = enxugarCasos(plano.casos, {
           acoes: (a) => a.startsWith("quadro.") && !ACOES_DO_QUADRO_COM_N.has(a),
           k: Math.ceil(N / 2),
-          idsDaPessoa: new Set([meu.agente.id, colunaDoFuzz, "voce", "cancelado", tarefaDoFuzz, movimentoDoFuzz, outraEscopo.pessoaId, labelQueSai, labelQueFica]),
+          idsDaPessoa: new Set([meu.agente.id, colunaDoFuzz, "voce", "cancelado", tarefaDoFuzz, movimentoDoFuzz, outraEscopo.pessoaId]),
         });
         // eslint-disable-next-line no-console
         console.log(`fuzz-acoes[${config.nome}]: ações do quadro com ${Math.ceil(N / 2)} entradas por rota: ${antes} → ${plano.casos.length} casos`);
@@ -418,16 +406,6 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         const base = plano.casos.find((c) => c.acao === acao && c.entrada.rotulo === "base plausível") ?? plano.casos[i]!;
         const segs = base.caminho.split("/");
         const caminho = segs.map((s, j) => (j > 0 && SEMEADOS[segs[j - 1]!] !== undefined ? encodeURIComponent(SEMEADOS[segs[j - 1]!]!) : s)).join("/");
-        plano.casos.splice(i, 0, { ...base, caminho });
-      }
-      // As labels: cada ação ganha um caso com a label dela no `:lid`, na posição do primeiro caso dela (passa com qualquer
-      // semente). O editar fica com a que não sai.
-      for (const [acao, label] of [["quadro.remover_label", labelQueSai], ["quadro.editar_label", labelQueFica]] as const) {
-        const i = plano.casos.findIndex((c) => c.acao === acao);
-        if (i < 0) continue;
-        const base = plano.casos.find((c) => c.acao === acao && c.entrada.rotulo === "base plausível") ?? plano.casos[i]!;
-        const segs = base.caminho.split("/");
-        const caminho = segs.map((s, j) => (j > 0 && segs[j - 1] === "agentes" ? encodeURIComponent(meu.agente.id) : j > 0 && segs[j - 1] === "labels" ? encodeURIComponent(label) : s)).join("/");
         plano.casos.splice(i, 0, { ...base, caminho });
       }
       const primeiraQueTira = plano.casos.findIndex((c) => c.acao === "quadro.mudar_tarefa");

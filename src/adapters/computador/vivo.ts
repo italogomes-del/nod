@@ -83,6 +83,22 @@ export function criarSessoesVivo(o: { prazoParMs?: number; reconferirMs?: number
       return { sessao, token };
     },
     /**
+     * Provedor externo pode levar segundos para abrir o VNC. Reconfere depois dessa espera e ANTES de instalar o relay;
+     * assim uma pessoa que perdeu o controle nesse intervalo não recebe nem envia um único frame.
+     */
+    async autorizarPareamento(sessao: string, token: string): Promise<boolean> {
+      const s = sessoes.get(sessao);
+      if (!s || s.motor) return false;
+      const a = Buffer.from(token);
+      const b = Buffer.from(s.token);
+      if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
+      if (!s.conferir) return true;
+      let permitido = false;
+      try { permitido = await s.conferir(); } catch { permitido = false; }
+      if (!permitido) encerrar(sessao, FECHAMENTOS_VIVO.trocou, "o controle mudou");
+      return permitido;
+    },
+    /**
      * O motor chegou com o id e o token. Confere o token em tempo constante; sessão desconhecida, já pareada ou token
      * errado: false (quem chamou fecha o socket). Pareada, os bytes passam a correr nos dois sentidos.
      */
