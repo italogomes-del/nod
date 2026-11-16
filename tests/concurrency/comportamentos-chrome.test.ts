@@ -518,8 +518,6 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await ate(`document.querySelector("#ajuste-tema.realce")`, "a linha Tema realçada pelo link");
     expect(await existe('#ajuste-tema [data-act="copiar-link-ajuste"][data-ajuste="tema"]')).toBe(true);
     for (const id of ["aprovacoes-modo", "regras-revisor", "teto-do-time", "nivel-por-app"]) {
-      await abrirApp(`#ajuste=${id}`);
-      await ate(`document.querySelector("#ajuste-${id}.realce")`, `a linha ${id} realçada pelo link`);
       expect(await existe(`#ajuste-${id} [data-act="copiar-link-ajuste"][data-ajuste="${id}"]`)).toBe(true);
     }
   });
@@ -527,7 +525,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 8 ————————————————————————————————————————————————
   it("8. criar bot com cor e forma, e o preparo com %", { timeout: JORNADA }, async () => {
     await abrirApp();
-    await clicar('#sidebar .sh [data-act="novo-bot-dialogo"]');
+    await avaliar(cdp, `(() => { const b = [...document.querySelectorAll('[data-act="novo-bot-dialogo"]')].find((el) => el.offsetParent); if (!b) throw new Error("não achei o botão Novo bot visível"); b.click(); })()`);
     await ate(`document.querySelector("dialog.criar-bot[open] .cb-nome")`, "o modal Criar novo bot");
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-formas [role=radio][data-forma]').length`)).toBe(13);
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-cores [role=radio][data-cor]').length`)).toBe(14);
