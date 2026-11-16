@@ -65,14 +65,14 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
     await srv.desligar();
   }, 30_000);
 
-  async function criarBot(nome: string): Promise<{ id: string; conversaId: string }> {
+  async function criarBot(nome: string): Promise<{ id: string; conversaId: string; nome: string }> {
     const r = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome, descricao: "Cuida das pautas" });
     agentes.push(r.agente.id);
     conversas.push(r.conversa.id);
     // Manual: a rotina vira o card de proposta (é o card que fica em contorno no celular).
     await srv.json("POST", `agentes/${r.agente.id}/modo-aprovacao`, { modo: "manual" });
     await srv.json("POST", `agentes/${r.agente.id}/quadro`, { meta: "Pautas da semana" });
-    return { id: r.agente.id, conversaId: r.conversa.id };
+    return { id: r.agente.id, conversaId: r.conversa.id, nome };
   }
 
   async function ate(expressao: string, oQue: string, ms = 15_000): Promise<void> {
@@ -101,9 +101,9 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
     await ate(`document.querySelector('[data-act="abrir-conversa"]')`, "a lista de bots");
   }
 
-  async function abrirConversa(bot: { id: string }): Promise<void> {
+  async function abrirConversa(bot: { id: string; nome: string }): Promise<void> {
     await clicar(`[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"], button[data-bot-contexto="${bot.id}"]`);
-    await ate(`document.querySelector('[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"][aria-current="true"]') && document.getElementById("composer-texto")`, "a conversa");
+    await ate(`document.getElementById("composer-texto") && [...document.querySelectorAll("#cabecalho .pilula-nome")].some((e) => e.textContent === ${JSON.stringify(bot.nome)})`, "a conversa");
   }
 
   /** Manda o pedido; o catcher chama criar_rotina (o card) e responde com RESPOSTA. */

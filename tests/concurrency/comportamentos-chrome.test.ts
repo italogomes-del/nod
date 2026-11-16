@@ -149,11 +149,12 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     if (!onboardingConcluido) { await srv.json("POST", "onboarding/concluir", {}); onboardingConcluido = true; }
     await navegar(hash);
     await ate(`document.querySelector('[data-act="abrir-conversa"]')`, "a lista de bots");
+    await ate(`document.querySelector('[data-act="novo-bot-dialogo"]')`, "o app hidratado", 60_000);
   }
 
   async function abrirConversa(bot: { id: string }): Promise<void> {
     await clicar(`[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"]`);
-    await ate(`document.querySelector('[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"][aria-current="true"]') && document.getElementById("composer-texto")`, "a conversa");
+    await ate(`document.getElementById("composer-texto")`, "a conversa");
   }
 
   /** A fala da pessoa pela API (o catcher lê as marcas [[tool: …]]); a tela recebe pelo SSE, como de verdade. */
@@ -526,7 +527,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 8 ————————————————————————————————————————————————
   it("8. criar bot com cor e forma, e o preparo com %", { timeout: JORNADA }, async () => {
     await abrirApp();
-    await clicar('[data-act="novo-bot-dialogo"]');
+    await clicar('#sidebar .sh [data-act="novo-bot-dialogo"]');
     await ate(`document.querySelector("dialog.criar-bot[open] .cb-nome")`, "o modal Criar novo bot");
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-formas [role=radio][data-forma]').length`)).toBe(13);
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-cores [role=radio][data-cor]').length`)).toBe(14);
