@@ -39,6 +39,7 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
   let dir: string;
   const agentes: string[] = [];
   const conversas: string[] = [];
+  let navegacao = 0;
 
   beforeAll(async () => {
     srv = await servidorCompleto({ env: { NOD_STATIC_DIR: WEB, NOD_PRAZO_DECISAO_MS: "86400000" }, drivers: ({ urlNod }) => [criarCatcherDriver({ urlNod, atrasoMs: 0 })] });
@@ -93,13 +94,16 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
       { name: "hover", value: celular ? "none" : "hover" }, { name: "pointer", value: celular ? "coarse" : "fine" },
       { name: "prefers-color-scheme", value: "light" }, { name: "prefers-reduced-motion", value: "reduce" },
     ] });
-    await cdp.enviar("Page.navigate", { url: `${srv.url}/` });
+    const marcador = String(++navegacao);
+    await cdp.enviar("Page.navigate", { url: `${srv.url}/?e2e=${marcador}` });
+    await espera(100);
+    await ate(`new URL(location.href).searchParams.get("e2e") === "${marcador}"`, "a página nova");
     await ate(`document.querySelector('[data-act="abrir-conversa"]')`, "a lista de bots");
   }
 
   async function abrirConversa(bot: { id: string }): Promise<void> {
     await clicar(`[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"], button[data-bot-contexto="${bot.id}"]`);
-    await ate(`document.getElementById("composer-texto")`, "a conversa");
+    await ate(`document.querySelector('[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"][aria-current="true"]') && document.getElementById("composer-texto")`, "a conversa");
   }
 
   /** Manda o pedido; o catcher chama criar_rotina (o card) e responde com RESPOSTA. */

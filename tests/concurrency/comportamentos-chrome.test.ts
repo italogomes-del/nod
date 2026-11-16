@@ -136,15 +136,24 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
 
   /** O item 10 roda o onboarding pela tela; os outros entram com ele concluído (como quem já passou por ele). */
   let onboardingConcluido = false;
+  let navegacao = 0;
+  async function navegar(hash = ""): Promise<void> {
+    const url = new URL(`${srv.url}/${hash}`);
+    const marcador = String(++navegacao);
+    url.searchParams.set("e2e", marcador);
+    await cdp.enviar("Page.navigate", { url: url.href });
+    await espera(100);
+    await ate(`new URL(location.href).searchParams.get("e2e") === "${marcador}"`, "a página nova");
+  }
   async function abrirApp(hash = ""): Promise<void> {
     if (!onboardingConcluido) { await srv.json("POST", "onboarding/concluir", {}); onboardingConcluido = true; }
-    await cdp.enviar("Page.navigate", { url: `${srv.url}/${hash}` });
+    await navegar(hash);
     await ate(`document.querySelector('[data-act="abrir-conversa"]')`, "a lista de bots");
   }
 
   async function abrirConversa(bot: { id: string }): Promise<void> {
     await clicar(`[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"]`);
-    await ate(`document.getElementById("composer-texto")`, "a conversa");
+    await ate(`document.querySelector('[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"][aria-current="true"]') && document.getElementById("composer-texto")`, "a conversa");
   }
 
   /** A fala da pessoa pela API (o catcher lê as marcas [[tool: …]]); a tela recebe pelo SSE, como de verdade. */
@@ -158,7 +167,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 10 ———————————————————————————————————————————————
   it("10. onboarding inteiro em 10 passos: boas-vindas → … → criar (cor e forma) → preparando com %", { timeout: JORNADA }, async () => {
     // Antes de qualquer outro: a pessoa nova, sem o onboarding concluído.
-    await cdp.enviar("Page.navigate", { url: `${srv.url}/` });
+    await navegar();
     // O passo pelo nome (os 10 de PASSOS em web/telas/apresentacao.ts); onde há os pontos, "Passo N de 10".
     const PASSOS = ["boas-vindas", "conhecer", "computador", "trabalho", "delegar", "funcao", "origem", "apps", "criar", "preparando"];
     const noPasso = (n: number) => ate(`document.querySelector(".ap-camada section.ap.ap-${PASSOS[n - 1]}") && (!document.querySelector(".ap-camada .ap-pontos") || document.querySelector(".ap-camada .ap-pontos").getAttribute("aria-label") === "Passo ${n} de 10")`, `o passo ${n} de 10 (${PASSOS[n - 1]})`);
