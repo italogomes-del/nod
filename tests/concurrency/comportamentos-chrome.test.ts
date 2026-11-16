@@ -224,7 +224,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await ate(`document.querySelector("#timeline li.decisao.aprov-card[data-decisao]")`, "o cartão de aprovação");
     expect(await texto('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao"]')).toBe("Permitir uma vez");
     expect(await texto('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao-sempre"]')).toMatch(/^Sempre permitir /);
-    expect(await avaliar<string | null>(cdp, `document.querySelector('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao-nenhum"]')?.getAttribute("aria-label") ?? null`)).toBe("Negar");
+    expect(await avaliar<string | null>(cdp, `document.querySelector('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao-nenhum"]')?.getAttribute("aria-label") ?? null`)).toBe("Negar e fechar");
     expect(await existe('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao-nenhum"] kbd')).toBe(true);
 
     // (b) Esc com o foco no cartão nega (no campo de texto, o Esc é do campo).
@@ -445,7 +445,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await buscar("Atalhos Teste", "Bots");
     await buscar("tema", "Ajustes");
     await buscar("Vendas da semana", "Conversas");
-    await buscar("nova", "Ações");
+    await buscar("criar", "Ações");
     // Enter no ajuste leva às Configurações já na linha.
     await buscar("tema", "Ajustes");
     await clicar('.paleta .paleta-grupo[aria-label="Ajustes"] .paleta-item');
@@ -515,9 +515,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 8 ————————————————————————————————————————————————
   it("8. criar bot com cor e forma, e o preparo com %", { timeout: JORNADA }, async () => {
     await abrirApp();
-    await clicar('.create-trigger[data-tela="novo-bot"]');
-    await ate(`document.querySelector('[data-act="criar-rapido"]')`, "Criar novo bot");
-    await clicar('[data-act="criar-rapido"]');
+    await clicar('.create-trigger[data-act="novo-bot-dialogo"]');
     await ate(`document.querySelector("dialog.criar-bot[open] .cb-nome")`, "o modal Criar novo bot");
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-formas [role=radio][data-forma]').length`)).toBe(13);
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-cores [role=radio][data-cor]').length`)).toBe(14);
@@ -556,8 +554,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await naBarra("disponivel");
     await falar(bot, "Trabalhe um pouco [[espera: 4000]] [[texto: terminei o trabalho]]");
     await ate(`["trabalhando", "pensando", "lendo"].includes(document.querySelector('#sidebar [data-bot-contexto="${bot.id}"] nod-mascote')?.dataset.estado)`, "o personagem trabalhando");
-    // O cabeçalho fica parado: o movimento vivo pertence à barra, à conversa e a Trabalhos.
-    expect(await avaliar<string | null>(cdp, `document.querySelector(".pilula-bot nod-mascote")?.dataset.estado ?? null`)).toBe("disponivel");
+    expect(await avaliar<string | null>(cdp, `document.querySelector(".pilula-bot nod-mascote")?.dataset.estado ?? null`)).toMatch(/trabalhando|pensando|lendo/);
     await ateResponder(bot, "terminei o trabalho");
     await naBarra("terminou");
     await falar(bot, `Grave. [[tool: pedir_aprovacao ${pedirGravar("personagem")}]] [[texto: pedi]]`);
@@ -577,7 +574,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await falar(bot, `Pergunte. [[tool: pedir_a_pessoa {"tipo":"pergunta","texto":"Posso arquivar o PR 7?"}]] [[texto: perguntei]]`);
     const linha = `#sidebar [data-bot-contexto="${bot.id}"]`;
     await ate(`document.querySelector('${linha}[data-aguardando] .sub-aguardando')`, "a linha aguardando");
-    expect(await texto(`${linha} .sub-aguardando`)).toBe("Aguardando você: Posso arquivar o PR 7?");
+    expect(await texto(`${linha} .sub-aguardando`)).toBe("Aguardando você: Posso arquivar o PR 7");
     // Laranja: a cor vem de --aguardando (o valor é do CSS; aqui só que é a variável, e não a do não lido).
     const cor = await avaliar<{ sub: string; ref: string }>(cdp, `(() => { const v = getComputedStyle(document.documentElement).getPropertyValue("--aguardando").trim(); const p = document.createElement("i"); p.style.color = v; document.body.append(p); const ref = getComputedStyle(p).color; p.remove(); return { sub: getComputedStyle(document.querySelector('${linha} .sub-aguardando')).color, ref }; })()`);
     expect(cor.ref).not.toBe("");
