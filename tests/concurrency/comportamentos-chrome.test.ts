@@ -186,7 +186,9 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await clicar('.cb-forma[title="Gota"]');
     await clicar('.cb-cor[title="Verde"]');
     await ate(`document.querySelector('.cb-forma[title="Gota"]')?.getAttribute("aria-checked") === "true" && document.querySelector('.cb-cor[title="Verde"]')?.getAttribute("aria-checked") === "true"`, "forma e cor escolhidas");
-    await avaliar(cdp, `(() => { const t = document.querySelector('textarea[data-campo-apres="primeira"]'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(t, "Organize as ideias desta semana [[texto: Organizei as ideias]]"); t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await avaliar(cdp, `(() => { const t = document.querySelector('textarea[data-campo-apres="primeira"]'); t.focus(); t.select(); })()`);
+    await cdp.enviar("Input.insertText", { text: "Organize as ideias desta semana [[texto: Organizei as ideias]]" });
+    await ate(`document.querySelector('textarea[data-campo-apres="primeira"]')?.value === "Organize as ideias desta semana [[texto: Organizei as ideias]]"`, "a primeira mensagem digitada");
     await clicar(".ap-enviar");
     // Preparando: a barra com % sobe até 100 e o personagem comemora; depois, a conversa do bot novo.
     await noPasso(10);
