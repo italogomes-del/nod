@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DriverComputador } from "../../../src/contracts/computador.ts";
-import type { PrimitivasDeComputador, ProvedorDeComputador } from "../../../src/contracts/provedor-computador.ts";
+import type { PrimitivasDeComputador, ProvedorDeComputador, RefComputador } from "../../../src/contracts/provedor-computador.ts";
 import { criarProvedorDocker } from "../../../src/adapters/computador/provedores/docker.ts";
 import { criarProvedorOrgo, estadoDoOrgo, nomeNoOrgo, teclaParaOrgo, urlVncDoOrgo } from "../../../src/adapters/computador/provedores/orgo.ts";
 import { criarExecutorPorPrimitivas, paginar, PEDACO_BASE64 } from "../../../src/adapters/computador/provedores/primitivas.ts";
@@ -476,6 +476,41 @@ describe("seletor de provedor (o DriverComputador de sempre)", () => {
 
     await driver.parar(ID, ESCOPO);
     expect(await driver.ligados()).toEqual(new Set());
+  });
+
+  it("duas trocas concorrentes deixam somente o provedor escolhido por último ligado", async () => {
+    const eventos: string[] = [];
+    let liberarDocker!: () => void;
+    const dockerPendente = new Promise<void>((resolve) => { liberarDocker = resolve; });
+    const mapa: Record<string, "docker" | "orgo"> = {};
+    const config = { padrao: "docker" as const, global: null, porPessoa: {}, porBot: mapa };
+    const docker = {
+      ...provedorFalso("docker", eventos),
+      iniciar: async (r: RefComputador) => {
+        eventos.push(`docker:iniciar:${r.id}`);
+        await dockerPendente;
+      },
+    };
+    const driver = criarDriverPorProvedor({
+      config,
+      provedores: { docker, orgo: provedorFalso("orgo", eventos) },
+      agenteDe: async () => BOT,
+    });
+
+    const primeira = driver.iniciar(ID, ESCOPO);
+    await vi.waitFor(() => expect(eventos).toEqual([`docker:iniciar:${ID}`]));
+    mapa[BOT] = "orgo";
+    const segunda = driver.iniciar(ID, ESCOPO);
+    await Promise.resolve();
+    expect(eventos).toEqual([`docker:iniciar:${ID}`]);
+    liberarDocker();
+    await Promise.all([primeira, segunda]);
+
+    expect(eventos).toEqual([
+      `docker:iniciar:${ID}`,
+      `docker:parar:${ID}`,
+      `orgo:iniciar:${ID}`,
+    ]);
   });
 
   it("provedor escolhido e não montado: falha fechada, sem cair em outro", async () => {

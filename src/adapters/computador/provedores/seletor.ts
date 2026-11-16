@@ -40,7 +40,20 @@ export function criarDriverPorProvedor(o: OpcoesSeletor): DriverPorProvedor {
   }
   /** Quem ligou cada computador neste processo (para desligar no antigo quando a escolha muda). */
   const ligadoEm = new Map<string, { id: string; provedor: IdProvedorComputador }>();
+  /** Liga/desliga em série por tela: uma resposta antiga nunca pode sobrescrever a escolha mais recente. */
+  const operacoes = new Map<string, Promise<void>>();
   const chaveDe = (id: string, escopo?: Escopo) => escopo ? `${escopo.tenantId}:${escopo.pessoaId}:${id}` : `sem-escopo:${id}`;
+
+  async function emSerie(chave: string, executar: () => Promise<void>): Promise<void> {
+    const anterior = operacoes.get(chave) ?? Promise.resolve();
+    const atual = anterior.catch(() => undefined).then(executar);
+    operacoes.set(chave, atual);
+    try {
+      await atual;
+    } finally {
+      if (operacoes.get(chave) === atual) operacoes.delete(chave);
+    }
+  }
 
   async function escolher(id: string, escopo?: Escopo): Promise<IdProvedorComputador | null> {
     // Falha fechada: se o vínculo não pôde ser lido, não podemos cair na regra da pessoa/global e abrir o perfil
@@ -76,25 +89,29 @@ export function criarDriverPorProvedor(o: OpcoesSeletor): DriverPorProvedor {
       return { disponivel: true, ativo: s?.estado === "ligado", motivo: a.motivo, reinicios: s?.reinicios ?? null, ...(a.limite ? { limite: a.limite } : {}) };
     },
     async iniciar(id, escopo) {
-      const p = await provedorDe(id, escopo);
       const chave = chaveDe(id, escopo);
-      const antes = ligadoEm.get(chave);
-      if (antes && antes.provedor !== p.id) {
-        log("info", "computador_provedor_trocado", { computador_id: id, de: antes.provedor, para: p.id });
-        await o.provedores[antes.provedor]?.parar(ref(id, escopo)).catch(() => undefined);
-        ligadoEm.delete(chave);
-      }
-      await p.iniciar(ref(id, escopo));
-      ligadoEm.set(chave, { id, provedor: p.id });
+      await emSerie(chave, async () => {
+        const p = await provedorDe(id, escopo);
+        const antes = ligadoEm.get(chave);
+        if (antes && antes.provedor !== p.id) {
+          log("info", "computador_provedor_trocado", { computador_id: id, de: antes.provedor, para: p.id });
+          await o.provedores[antes.provedor]?.parar(ref(id, escopo)).catch(() => undefined);
+          ligadoEm.delete(chave);
+        }
+        await p.iniciar(ref(id, escopo));
+        ligadoEm.set(chave, { id, provedor: p.id });
+      });
     },
     async parar(id, escopo) {
-      const p = await provedorDe(id, escopo);
-      await p.parar(ref(id, escopo));
       const chave = chaveDe(id, escopo);
-      const antes = ligadoEm.get(chave);
-      if (antes && antes.provedor !== p.id) await o.provedores[antes.provedor]?.parar(ref(id, escopo)).catch(() => undefined);
-      ligadoEm.delete(chave);
-      executores.get(p.id)?.esquecer(ref(id, escopo));
+      await emSerie(chave, async () => {
+        const p = await provedorDe(id, escopo);
+        await p.parar(ref(id, escopo));
+        const antes = ligadoEm.get(chave);
+        if (antes && antes.provedor !== p.id) await o.provedores[antes.provedor]?.parar(ref(id, escopo)).catch(() => undefined);
+        ligadoEm.delete(chave);
+        executores.get(p.id)?.esquecer(ref(id, escopo));
+      });
     },
     async executar(id, acao, escopo, autor) {
       const p = await provedorDe(id, escopo);
