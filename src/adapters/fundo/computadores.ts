@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AcaoComputador, Computador, ComputadorDto, ControleComputador, DriverComputador, OrigemControle, PoliticaComputador, RegistroComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import type { ComputadorDaPessoa, ComputadorDaPessoaDto, EstadoComputadorDaPessoa, EstadoComputadorRelatado, OperacaoComputador, OperacaoDaPessoa, TelaComputadorBot } from "../../contracts/computador-motor.ts";
 import type { SessaoVivo } from "../../contracts/computador-vivo.ts";
+import type { AcessoTelaAoVivo } from "../../contracts/provedor-computador.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -986,9 +987,29 @@ export function criarComputadores(o: Opcoes) {
       });
       await o.driver.vivo(c.id, sessao, escopo).catch((e: unknown) => { throw comoErroDeDominio(e); });
     },
+    /** Provedor externo: autoriza a mesma tela, mas devolve ao servidor o acesso que ele vai retransmitir. */
+    async acessoVivo(escopo: Escopo, agenteId: string): Promise<AcessoTelaAoVivo | null> {
+      if (porPessoa || !o.driver.acessoTelaAoVivo) return null;
+      const c = await o.dentro(escopo, async (d) => {
+        const c = await obter(d, agenteId);
+        if (!c.habilitado || c.controle !== "pessoa") throw new ErroDeDominio("nao_permitido");
+        if (c.indisponivelDesde !== null) throw new ErroDeDominio("estado_invalido", { cause: "computador fora do ar" });
+        if ((await d.repos.computadores.ultimoFreio(c.computadorId, null))?.tipo === "parar") throw new ErroDeDominio("nao_permitido");
+        return c;
+      });
+      return o.driver.acessoTelaAoVivo(c.id, escopo).catch((e: unknown) => { throw comoErroDeDominio(e); });
+    },
     /** Revisão do PR #599: a sessão ao vivo reconfere isto; só a pessoa no controle, com a tela habilitada, segue. */
     async vivoAindaPode(escopo: Escopo, agenteId: string): Promise<boolean> {
-      if (!porPessoa) return false;
+      if (!porPessoa) {
+        return o.dentro(escopo, async (d) => {
+          const agente = await d.repos.agentes.buscar(agenteId);
+          if (!agente || agente.ownerId !== escopo.pessoaId) return false;
+          const c = await d.repos.computadores.buscarVinculo(agenteId, "por_bot");
+          if (!c || !c.habilitado || c.controle !== "pessoa" || c.indisponivelDesde !== null) return false;
+          return (await d.repos.computadores.ultimoFreio(c.id, null))?.tipo !== "parar";
+        });
+      }
       // 2ª revisão: só lê (como o `consultar`) — o `obter` vincula, cria e trava a tela a cada 10 s por sessão.
       return o.dentro(escopo, async (d) => {
         const agente = await d.repos.agentes.buscar(agenteId);
