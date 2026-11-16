@@ -228,6 +228,7 @@ descrever("celular: aviso do Backlog, prioridade, alvos de 44 px e a máquina em
 
   it("a tarefa que rodou: Repetir e Ver o trabalho com 44 px, e Ver o trabalho diz a máquina", async () => {
     await abrirTarefa("Rodou uma vez");
+    await ate(`document.querySelector('#quadro .qd-tarefa-cel [data-act="run-ver"]') || document.querySelector('#quadro .qd-tarefa-cel [data-act="run-abrir"]')`, "o run da tarefa");
     const abrirRun = '#quadro .qd-tarefa-cel [data-act="run-abrir"]';
     if (await avaliar<boolean>(cdp, `!!document.querySelector(${JSON.stringify(abrirRun)})`)) await clicar(abrirRun);
     await ate(`document.querySelector('#quadro .qd-tarefa-cel [data-act="run-ver"]')`, "o bloco do run com Ver o trabalho");
