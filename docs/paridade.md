@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **200**, mais 3 só de leitura. No chat: **75 vivas**, 3 parciais, 90 faltando e 35 que nunca vão para o chat. Piso de vivas: 75.
+Ações de pessoa que mudam algo: **206**, mais 3 só de leitura. No chat: **75 vivas**, 3 parciais, 90 faltando e 41 que nunca vão para o chat. Piso de vivas: 75.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
