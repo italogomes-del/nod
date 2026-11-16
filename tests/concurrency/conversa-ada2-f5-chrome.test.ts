@@ -308,7 +308,8 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
     // Revisão do PR #703: a fala de vários balões (um por parágrafo) que abre com bloco de código. Todos os balões se escondem,
     // então todos ganham cópia; e as setas/Home andam só entre os itens do menu (o Copiar do código na cópia é inert).
     const LONGA = "```\nx = 1\n```\n\nDepois do código, o parágrafo da fala longa.";
-    await srv.json("POST", `conversas/${bot.conversaId}/mensagens`, { texto: `Mais uma [[texto: ${LONGA}]]` });
+    await avaliar(cdp, `(() => { const ta = document.getElementById("composer-texto"); ta.focus(); ta.value = ${JSON.stringify(`Mais uma [[texto: ${LONGA}]]`)}; ta.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await clicar('.composer [data-act="enviar"]');
     const seletorDaLonga = `[...document.querySelectorAll("#timeline .message.bot[data-mensagem]")].find((m) => [...m.querySelectorAll(".bubble")].some((b) => b.textContent.includes("parágrafo da fala longa")))`;
     await ate(`(${seletorDaLonga})?.querySelectorAll(".bubble").length >= 2 && (${seletorDaLonga}).querySelector('[data-act="copiar-codigo"]')`, "a fala longa em balões, com o código", 60_000);
     await tocar(650, seletorDaLonga);
