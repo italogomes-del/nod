@@ -359,6 +359,17 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | --- | --- | --- | --- | --- |
 | `decisoes.exportar` | Exportar decisões de autorização em CSV | pessoa_confirma | vivo (`decisoes`) | a tela baixa por GET; o chat confirma no cartão e ambos chamam exportarDecisoesCsv |
 
+## aprovacoes
+
+| Ação | O que faz | Risco | No chat | Rotas |
+| --- | --- | --- | --- | --- |
+| `aprovacoes.criar_regra` | Ensinar uma regra ao revisor (Pode fazer sem perguntar / Sempre me pergunte) | pessoa_confirma | nunca: muda o que um bot pode fazer sem perguntar: só a pessoa, nos Ajustes ou no clique do cartão (um bot poderia se dar alçada pela conversa) | `POST ^\/aprovacoes\/regras$` |
+| `aprovacoes.editar_regra` | Editar uma regra do revisor | pessoa_confirma | nunca: muda o que um bot pode fazer sem perguntar: só a pessoa, nos Ajustes ou no clique do cartão (um bot poderia se dar alçada pela conversa) | `PATCH ^\/aprovacoes\/regras\/(?<id>[^/]+)$` |
+| `aprovacoes.apagar_regra` | Apagar uma regra do revisor | muda | nunca: muda o que um bot pode fazer sem perguntar: só a pessoa, nos Ajustes ou no clique do cartão (um bot poderia se dar alçada pela conversa) | `DELETE ^\/aprovacoes\/regras\/(?<id>[^/]+)$` |
+| `aprovacoes.nivel_ferramenta` | Definir o nível de um app (sempre permitir, sempre pedir, bloqueado, o revisor decide) | pessoa_confirma | nunca: muda o que um bot pode fazer sem perguntar: só a pessoa, nos Ajustes ou no clique do cartão (um bot poderia se dar alçada pela conversa) | `POST ^\/aprovacoes\/niveis$` |
+| `aprovacoes.so_leitura` | Ligar ou desligar o só leitura de um bot | muda | nunca: muda o que um bot pode fazer sem perguntar: só a pessoa, nos Ajustes ou no clique do cartão (um bot poderia se dar alçada pela conversa) | `POST ^\/agentes\/(?<id>[^/]+)\/so-leitura$` |
+| `aprovacoes.teto` | Definir o teto do modo de aprovação do time (admin) | pessoa_confirma | nunca: muda o que um bot pode fazer sem perguntar: só a pessoa, nos Ajustes ou no clique do cartão (um bot poderia se dar alçada pela conversa) | `POST ^\/aprovacoes\/teto$` |
+
 ## O que cada onda leva
 
 - **NOD-393** (Onda 1: bots e rotinas): `bots.restaurar`, `bots.fixar`, `bots.ocultar`, `bots.definir_inteligencia`, `bots.cobrar_colega`, `memoria.criar`, `memoria.editar`, `memoria.apagar`, `memoria.revisar_diario`, `memoria.desfazer_diario`, `rotinas.mudar_ritmo`, `rotinas.gerar_endereco`, `rotinas.enviar_teste`

@@ -106,7 +106,9 @@ window.__comentou = () => { window.__coms = (window.__coms ?? 0) + 1; frame("qua
 // A releitura que traz o mesmo quadro (o frame da própria resposta, o reconectar).
 window.__mesmo = () => frame("quadro.mudou", { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "" });
 window.__meta2 = () => { window.__meta = "Meta nova"; frame("quadro.mudou", { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "" }); };
-window.__encerrou = () => frame("turno.encerrado", { conversaId: "c9", turnoId: "x" });
+// Q4 (2026-11-12): o turno que acaba é o de uma tarefa do quadro (tu1); o de um bot de fora (__encerrouFora) não relê.
+window.__encerrou = () => frame("turno.encerrado", { conversaId: "c9", turnoId: "tu1" });
+window.__encerrouFora = () => { frame("turno.iniciado", { conversaId: "c9", turnoId: "x", agente_id: "fora" }); frame("turno.encerrado", { conversaId: "c9", turnoId: "x" }); };
 window.__delta = () => frame("turno.delta", { conversaId: "c9", turnoId: "x", texto: "abc" });
 window.__passoVivo = (n, turno = "tv") => frame("turno.atividade", { conversaId: "c0", turnoId: turno, rotulo: "Passo " + n, id: turno + "p" + n });
 window.__montar = () => {
@@ -328,6 +330,15 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await ate("window.__lidas >= 1");
     await avaliar(cdp, "window.__meta2()");
     await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("Meta nova")`);
+  }, 60_000);
+
+  it("Q4: 1440×900: o turno de um bot de fora do quadro (começo e fim) não relê nem regrava", async () => {
+    await montar(1440, 900, false);
+    await observar();
+    await avaliar(cdp, "window.__encerrouFora()");
+    await esperar(800);
+    expect(await avaliar<number>(cdp, "window.__lidas"), "leituras do quadro por um turno de fora").toBe(0);
+    expect(await avaliar<number>(cdp, "window.__regravacoes"), "regravações por um turno de fora").toBe(0);
   }, 60_000);
 
   it("1440×900: a recusa do servidor com o quadro igual redesenha (o select volta ao status real)", async () => {
@@ -1188,10 +1199,9 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await esperar(120);
     const antes = await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height`);
     expect((await medir()).max, "o quadro precisa rolar para o teste valer").toBeGreaterThan(200);
-    // Quadro minimalista (PR #723): o "Comigo" saiu dos chips da barra e virou o "Você" da pílula de quem está no quadro.
-    await avaliar(cdp, `document.querySelector('#quadro [data-act="ativos-abrir"]').click()`);
-    await ate(`document.querySelector('#quadro #qm-pop-ativos [data-act="filtro-do-quadro"][data-filtro="comigo"]')`);
-    await avaliar(cdp, `document.querySelector('#quadro #qm-pop-ativos [data-act="filtro-do-quadro"][data-filtro="comigo"]').click()`);
+    // Tela 18 do Paper: o "Comigo" é o "Você" do filtro por pessoa, na própria barra.
+    await ate(`document.querySelector('#quadro .qm-pes [data-act="filtro-do-quadro"][data-filtro="comigo"]')`);
+    await avaliar(cdp, `document.querySelector('#quadro .qm-pes [data-act="filtro-do-quadro"][data-filtro="comigo"]').click()`);
     await esperar(250);
     expect(await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").scrollHeight`), "o filtro encolheu a lista na hora (a reserva deixaria o espaço em branco)").toBeLessThan(antes - 100);
     expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "sem reserva na regravação da pessoa").toBe("");

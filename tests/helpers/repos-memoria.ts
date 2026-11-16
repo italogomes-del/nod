@@ -1,5 +1,7 @@
 import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
 import type { CondicaoDaVolta } from "../../src/contracts/quadro-execucoes.ts";
+import type { NivelDeFerramenta, RegraRevisor, TetoModo } from "../../src/contracts/ajustes-aprovacao.ts";
+import { tetoMaisFechado } from "../../src/domain/ajustes-aprovacao.ts";
 import { temFalha, type EstadoDisjuntor } from "../../src/domain/disjuntor-conector.ts";
 import { ehDecisao, MOTIVOS_DE_CONECTOR_FORA } from "../../src/domain/decisoes.ts";
 import { desfechoAutorizaItemLocal } from "../../src/domain/autoridade-item-local.ts";
@@ -359,6 +361,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const repos = {
     computadores: {
       buscarVinculo: async () => null, buscarDoAgente: async () => undefined,
+      agenteDoComputador: async () => null,
       obter: async () => null, travar: async () => null, configurar: async () => undefined,
       ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [], ociosos: async () => [], emUsoPor: async () => null,
       buscarAcao: async () => null, concluir: async () => undefined,
@@ -385,6 +388,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     pessoas: {
       async buscar(id: string) {
         return doTenant(b.pessoas).find((p) => p.id === id) ?? null;
+      },
+      async buscarVarias(ids: readonly string[]) {
+        return doTenant(b.pessoas).filter((p) => ids.includes(p.id));
       },
       async listarDoTenant() {
         return doTenant(b.pessoas).sort((x, y) => x.nome.localeCompare(y.nome));
@@ -585,6 +591,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscar(id, incluirExcluidos = false) {
         return doTenant(b.agentes).find((a) => a.id === id && (incluirExcluidos || !a.excluidoEm)) ?? null;
       },
+      async buscarVarios(ids, incluirExcluidos = false) {
+        return doTenant(b.agentes).filter((a) => ids.includes(a.id) && (incluirExcluidos || !a.excluidoEm));
+      },
       async buscarPorNome(nome) {
         return doTenant(b.agentes).find((a) => a.nome.toLowerCase() === nome.toLowerCase()) ?? null;
       },
@@ -643,6 +652,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const as = doTenant(b.agentes).filter((x) => ids.includes(x.id) && x.ownerId === escopo.pessoaId && !x.excluidoEm);
         for (const a of as) a.maquinaId = maquinaId;
         return as;
+      },
+      async definirSoLeitura(id, soLeitura) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm);
+        if (!a) return null;
+        a.soLeitura = soLeitura;
+        a.soLeituraPedido = soLeitura;
+        return a;
       },
       async definirModoAprovacao(id, modo) {
         const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm);
@@ -1210,6 +1226,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         p.payload = payload;
         return p;
       },
+      // O cofre (nome, app e data; nunca o valor) só existe no Postgres; em memória não há credencial guardada.
+      async credenciaisGuardadas() { return []; },
     },
 
     contasIa: contasIaMemoria(b.contasIa, escopo),
@@ -1384,7 +1402,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .map((a) => {
             const itens = a.modo === "automatico" && a.veredito === "libera" && a.decisaoId ? b.itens.filter((i) => i.decisaoId === a.decisaoId) : [];
             const item = itens.length === 1 && itens[0] ? { texto_final: itens[0].textoFinal, destino: itens[0].destino } : null;
-            return { id: a.id, turno_id: a.turnoId, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, motivo: a.motivo ?? null, criado_em: new Date(a.criadoEm), linux: false, item };
+            return { id: a.id, turno_id: a.turnoId, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, motivo: a.motivo ?? null, criado_em: new Date(a.criadoEm), linux: false, item, regra: null };
           });
       },
       async semAprovacaoDoDia(agenteId, f, limite) {
@@ -4277,6 +4295,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return true;
       },
     },
+    // ADR-167: as regras do revisor, os níveis e o teto em memória (o Postgres é provado em tests/integration/ajustes-aprovacao.test.ts).
+    ajustesAprovacao: ajustesEmMemoria(b, escopo),
+    // 0174: VM do Nod, vez na sala, memória de time e passkey são só do Postgres (tests/integration/vm-sala-memoria-passkey.test.ts).
+    vmsDoNod: reposSoNoPostgres("vmsDoNod"),
+    vezNaSala: reposSoNoPostgres("vezNaSala"),
+    memoriaDeTime: reposSoNoPostgres("memoriaDeTime"),
+    passkeys: reposSoNoPostgres("passkeys"),
     // NOD-346: o "Sobre mim" é do Postgres (tests/integration/minha-conta.test.ts); aqui fica vazio.
     perfil: {
       buscar: async () => ({ apelido: null, sobreMim: null, temFoto: false }),
@@ -4296,6 +4321,51 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   } satisfies Repos;
 
   return repos;
+}
+
+/** ADR-167: Ajustes > Aprovações em memória, um conjunto por banco de mentira. */
+const AJUSTES_EM_MEMORIA = new WeakMap<object, { regras: RegraRevisor[]; niveis: (NivelDeFerramenta & { ownerId: string })[]; tetos: { ownerId: string; teto: TetoModo }[] }>();
+/** Repo que só existe no Postgres: qualquer chamada em memória é erro do teste, nunca um vazio silencioso. */
+function reposSoNoPostgres<K extends "vmsDoNod" | "vezNaSala" | "memoriaDeTime" | "passkeys">(nome: K): Repos[K] {
+  return new Proxy({}, { get: (_, m) => () => { throw new Error(`${nome}.${String(m)} só existe no Postgres`); } }) as Repos[K];
+}
+
+function ajustesEmMemoria(b: object, escopo: Escopo): Repos["ajustesAprovacao"] {
+  const st = AJUSTES_EM_MEMORIA.get(b) ?? { regras: [], niveis: [], tetos: [] };
+  AJUSTES_EM_MEMORIA.set(b, st);
+  return {
+    regras: async () => st.regras.slice(),
+    regrasDaLista: async (agenteId, lista) => st.regras.filter((r) => r.agenteId === agenteId && r.lista === lista),
+    buscarRegra: async (id) => st.regras.find((r) => r.id === id) ?? null,
+    criarRegra: async (r) => {
+      const regra: RegraRevisor = { id: randomUUID(), criadoEm: Date.now() + st.regras.length, ...r };
+      st.regras.push(regra);
+      return regra;
+    },
+    editarRegra: async (id, texto) => {
+      const r = st.regras.find((x) => x.id === id);
+      if (!r) return null;
+      r.texto = texto;
+      return r;
+    },
+    apagarRegra: async (id) => {
+      const i = st.regras.findIndex((x) => x.id === id);
+      if (i < 0) return false;
+      st.regras.splice(i, 1);
+      return true;
+    },
+    niveis: async () => st.niveis.filter((n) => n.ownerId === escopo.pessoaId).map(({ ownerId: _o, ...n }) => n),
+    definirNivel: async (n) => {
+      const i = st.niveis.findIndex((x) => x.ownerId === escopo.pessoaId && x.agenteId === n.agenteId && x.conector === n.conector && x.ferramenta === n.ferramenta && x.tipo === n.tipo);
+      if (i >= 0) st.niveis.splice(i, 1);
+      if (n.nivel !== "revisor") st.niveis.push({ ...n, ownerId: escopo.pessoaId });
+    },
+    teto: async () => tetoMaisFechado(st.tetos.map((t) => t.teto)),
+    definirTeto: async (teto) => {
+      st.tetos = st.tetos.filter((t) => t.ownerId !== escopo.pessoaId);
+      if (teto) st.tetos.push({ ownerId: escopo.pessoaId, teto });
+    },
+  };
 }
 
 /** NOD-374: o estado do disjuntor de um conector em memória (campos opcionais no contrato viram os padrões). */
