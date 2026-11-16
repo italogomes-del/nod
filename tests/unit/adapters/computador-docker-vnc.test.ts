@@ -1,0 +1,59 @@
+import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { abrirVncDocker, VNC_DOCKER_FILA_MAX_BYTES } from "../../../src/adapters/computador/docker.ts";
+
+const RAIZ = join(import.meta.dirname, "../../..");
+const ID = "11111111-2222-4333-8444-555555555555";
+
+function processoFalso() {
+  const stdout = new EventEmitter();
+  const stdin = Object.assign(new EventEmitter(), { writableLength: 0, write: vi.fn(() => true), end: vi.fn() });
+  const processo = Object.assign(new EventEmitter(), { stdout, stdin, stderr: new EventEmitter(), kill: vi.fn(() => true) });
+  const spawn = vi.fn(() => processo);
+  return { processo, stdout, stdin, spawn };
+}
+
+describe("VNC contínuo do Docker", () => {
+  it("a imagem sobe x11vnc somente em socket Unix e não publica porta", () => {
+    const dockerfile = readFileSync(join(RAIZ, "infra/computador/Dockerfile"), "utf8");
+    const runtime = readFileSync(join(RAIZ, "infra/computador/runtime.mjs"), "utf8");
+    const ponte = readFileSync(join(RAIZ, "infra/computador/vnc-bridge.mjs"), "utf8");
+    expect(dockerfile).toContain("x11vnc");
+    expect(dockerfile).not.toMatch(/^EXPOSE\s/im);
+    expect(runtime).toContain("'-rfbport','0','-rfbportv6','0','-unixsock','/tmp/nod-vnc.sock'");
+    expect(ponte).toContain("path: '/tmp/nod-vnc.sock'");
+    expect(ponte).not.toMatch(/listen\s*\(/);
+  });
+
+  it("atravessa relay → docker exec → ponte VNC em bytes e fecha os dois lados", async () => {
+    const f = processoFalso();
+    const fluxo = await abrirVncDocker(ID, f.spawn);
+    const dados = vi.fn();
+    const fechou = vi.fn();
+    fluxo.aoDados(dados);
+    fluxo.aoFechar(fechou);
+    f.stdout.emit("data", Buffer.from([1, 2, 3]));
+    fluxo.enviar(Uint8Array.from([4, 5]));
+    expect(f.spawn).toHaveBeenCalledWith("docker", ["exec", "-i", `nod-computador-${ID}`, "node", "/opt/nod/vnc-bridge.mjs"], { stdio: ["pipe", "pipe", "pipe"] });
+    expect(dados).toHaveBeenCalledWith(Buffer.from([1, 2, 3]));
+    expect(f.stdin.write).toHaveBeenCalledWith(Buffer.from([4, 5]));
+    fluxo.fechar(1000);
+    expect(f.stdin.end).toHaveBeenCalledOnce();
+    expect(f.processo.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(fechou).toHaveBeenCalledOnce();
+  });
+
+  it("derruba a ponte quando a fila de entrada passa do teto", async () => {
+    const f = processoFalso();
+    f.stdin.writableLength = VNC_DOCKER_FILA_MAX_BYTES;
+    const fluxo = await abrirVncDocker(ID, f.spawn);
+    const fechou = vi.fn();
+    fluxo.aoFechar(fechou);
+    fluxo.enviar(Uint8Array.from([1]));
+    expect(f.stdin.write).not.toHaveBeenCalled();
+    expect(f.processo.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(fechou).toHaveBeenCalledOnce();
+  });
+});

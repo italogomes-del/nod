@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
 import type { AcaoComputador, AmbienteComputador, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
+import type { FluxoTelaAoVivo } from "../../contracts/provedor-computador.ts";
 import { MOTIVOS_FALHA_COMPUTADOR, type MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import { FalhaComputador, limiteDoAmbiente } from "../../domain/computador.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
@@ -62,6 +63,40 @@ function lerPing(saida: string): Ping | null {
 }
 
 const pausa = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+export const VNC_DOCKER_FILA_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * NOD-496: liga o relay ao x11vnc pelo namespace do próprio container. `docker exec` não publica porta e o processo
+ * interno só disca `/tmp/nod-vnc.sock`. Fechar qualquer ponta mata a ponte e, portanto, a sessão do x11vnc.
+ */
+export function abrirVncDocker(id: string, spawnImpl: typeof spawn = spawn): Promise<FluxoTelaAoVivo> {
+  if (!/^[a-f0-9-]{36}$/.test(id)) return Promise.reject(new ErroDeDominio("entrada_invalida"));
+  const p = spawnImpl("docker", ["exec", "-i", `nod-computador-${id}`, "node", "/opt/nod/vnc-bridge.mjs"], { stdio: ["pipe", "pipe", "pipe"] });
+  let dados: ((bytes: Uint8Array) => void) | null = null;
+  let fechou: (() => void) | null = null;
+  let encerrado = false;
+  const encerrar = () => { if (encerrado) return; encerrado = true; fechou?.(); };
+  p.stdout.on("data", (b: Buffer) => dados?.(b));
+  p.stdout.on("error", encerrar);
+  p.stdin.on("error", encerrar);
+  p.on("error", encerrar);
+  p.on("close", encerrar);
+  return Promise.resolve({
+    enviar(bytes) {
+      if (encerrado) return;
+      if (p.stdin.writableLength + bytes.byteLength > VNC_DOCKER_FILA_MAX_BYTES) {
+        p.kill("SIGTERM");
+        encerrar();
+        return;
+      }
+      p.stdin.write(Buffer.from(bytes));
+    },
+    aoDados(fn) { dados = fn; },
+    aoFechar(fn) { fechou = fn; if (encerrado) queueMicrotask(fn); },
+    fechar() { if (encerrado) return; p.stdin.end(); p.kill("SIGTERM"); encerrar(); },
+  });
+}
+
 export function criarDriverDocker(env: Readonly<Record<string, string | undefined>>): DriverComputador {
   const imagem = env.NOD_COMPUTADOR_IMAGEM || "nod-computador:1";
   const habilitado = env.NOD_COMPUTADORES === "docker";

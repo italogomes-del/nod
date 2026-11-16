@@ -753,7 +753,8 @@ export function comporApp(o: OpcoesCompor): App {
   // A escolha por env não basta para ligar uma integração de terceiro: a flag explícita continua desligada por padrão;
   // a chave ainda é exigida por pessoa, diretamente do cofre, antes de qualquer chamada ao Orgo.
   const orgoHabilitado = env.NOD_COMPUTADOR_ORGO === "1";
-  const temVivoExterno = orgoHabilitado && configProvedoresLida ? provedoresEmUso(configProvedoresLida.config).includes("orgo") : false;
+  const provedoresEmUsoAgora = configProvedoresLida ? provedoresEmUso(configProvedoresLida.config) : [];
+  const temVivoExterno = (orgoHabilitado && provedoresEmUsoAgora.includes("orgo")) || provedoresEmUsoAgora.includes("docker");
   const sessoesVivo = computadorNoMotor || temVivoExterno ? criarSessoesVivo() : null;
   const driverMotor = canalComputador ? criarDriverMotor({
     env,

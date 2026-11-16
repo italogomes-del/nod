@@ -106,8 +106,10 @@ export function criarDriverPorProvedor(o: OpcoesSeletor): DriverPorProvedor {
     },
     async vivo(id: string, sessao: SessaoVivo, escopo?: Escopo) {
       const p = await provedorDe(id, escopo);
-      if (!escopo || p.capacidades.telaAoVivo !== "vnc_websocket" || !p.acessoTela || !o.anexarVivo) throw new FalhaComputador("nao_iniciou", { detalhe: "o provedor usa capturas para esta tela" });
-      const origem = await (o.abrirVivo ?? abrirOrigemRfb)(await p.acessoTela(ref(id, escopo)));
+      if (!escopo || p.capacidades.telaAoVivo !== "vnc_websocket" || (!p.acessoTela && !p.abrirTelaAoVivo) || !o.anexarVivo) throw new FalhaComputador("nao_iniciou", { detalhe: "o provedor usa capturas para esta tela" });
+      const origem = p.abrirTelaAoVivo
+        ? await p.abrirTelaAoVivo(ref(id, escopo))
+        : await (o.abrirVivo ?? abrirOrigemRfb)(await p.acessoTela!(ref(id, escopo)));
       if (o.anexarVivo(sessao.sessao, sessao.token, origem)) return;
       origem.fechar(1008, "sessao encerrada");
       throw new FalhaComputador("acao_falhou", { detalhe: "a sessão ao vivo expirou" });
