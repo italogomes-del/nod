@@ -306,6 +306,7 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
     const botLonga = await criarBot("Longa F5");
     // A criação direta pela API não emite uma atualização da frota para a página já aberta.
     await abrir(390, 844);
+    await ate(`document.querySelector('[data-bot-contexto="${botLonga.id}"]')`, "o bot novo na frota");
     await abrirConversa(botLonga);
     const LONGA = "```\nx = 1\n```\n\nDepois do código, o parágrafo da fala longa.";
     await srv.json("POST", `conversas/${botLonga.conversaId}/mensagens`, { texto: `Mais uma [[texto: ${LONGA}]]` });
