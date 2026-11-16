@@ -9,7 +9,13 @@ socket.on('connect', () => {
   socket.pipe(process.stdout);
 });
 socket.on('error', () => { process.exitCode = 1; });
-socket.on('close', () => { process.stdin.unpipe(socket); process.stdout.end(); });
+socket.on('close', () => {
+  process.stdin.unpipe(socket);
+  // `docker exec -i` mantém stdin aberto. Sem destruí-lo, a ponte pode sobreviver à queda do VNC e o relay nunca recebe
+  // EOF para reconectar ou cair para capturas.
+  process.stdin.destroy();
+  process.stdout.end();
+});
 process.stdin.on('error', encerrar);
 process.stdin.on('end', () => socket.end());
 process.on('SIGTERM', encerrar);

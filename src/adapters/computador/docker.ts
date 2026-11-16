@@ -66,7 +66,11 @@ const pausa = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 export const VNC_DOCKER_FILA_MAX_BYTES = 8 * 1024 * 1024;
 
 type ProcessoVnc = {
-  stdout: { on(evento: "data", fn: (bytes: Buffer) => void): unknown; on(evento: "error", fn: () => void): unknown };
+  stdout: {
+    on(evento: "data", fn: (bytes: Buffer) => void): unknown;
+    on(evento: "error" | "end", fn: () => void): unknown;
+  };
+  stderr: { on(evento: "data", fn: (bytes: Buffer) => void): unknown };
   stdin: { writableLength: number; on(evento: "error", fn: () => void): unknown; write(bytes: Buffer): unknown; end(): unknown };
   on(evento: "error" | "close", fn: () => void): unknown;
   kill(sinal: NodeJS.Signals): unknown;
@@ -83,10 +87,15 @@ export function abrirVncDocker(id: string, spawnImpl: SpawnVnc = spawn): Promise
   let dados: ((bytes: Uint8Array) => void) | null = null;
   let fechou: (() => void) | null = null;
   let encerrado = false;
-  const encerrar = () => { if (encerrado) return; encerrado = true; fechou?.(); };
+  const encerrar = (matar = false) => { if (encerrado) return; encerrado = true; if (matar) p.kill("SIGTERM"); fechou?.(); };
   p.stdout.on("data", (b: Buffer) => dados?.(b));
-  p.stdout.on("error", encerrar);
-  p.stdin.on("error", encerrar);
+  // O bridge fecha stdout quando o socket Unix do x11vnc cai. O `docker exec -i` pode continuar esperando stdin;
+  // tratar `end` e matá-lo garante que a sessão saiba da queda e a web reconecte/caia para capturas.
+  p.stdout.on("end", () => encerrar(true));
+  p.stdout.on("error", () => encerrar(true));
+  // Sem consumidor, um erro repetido do CLI poderia lotar o pipe de stderr e impedir o fechamento.
+  p.stderr.on("data", () => undefined);
+  p.stdin.on("error", () => encerrar(true));
   p.on("error", encerrar);
   p.on("close", encerrar);
   return Promise.resolve({
