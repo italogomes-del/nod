@@ -46,19 +46,24 @@ export function respostaVnc(senha: string, desafio: Uint8Array): Buffer {
 
 async function autenticarUpstream(fila: FilaBytes, enviar: (b: Buffer) => void, senha: string): Promise<Buffer> {
   const versao = await fila.ler(12);
-  if (!/^RFB 003\.00[3-8]\n$/.test(versao.toString("ascii"))) throw new Error("rfb_versao_invalida");
+  // O handshake 3.3 usa um security-type de quatro bytes, diferente da lista do 3.7/3.8. Falhar fechado evita interpretar
+  // bytes sob outro protocolo; o endpoint documentado do Orgo fala 3.8.
+  if (!/^RFB 003\.00[78]\n$/.test(versao.toString("ascii"))) throw new Error("rfb_versao_invalida");
   enviar(Buffer.from("RFB 003.008\n"));
   const n = (await fila.ler(1))[0]!;
   if (n === 0) { const tam = (await fila.ler(4)).readUInt32BE(); await fila.ler(Math.min(tam, 4_096)); throw new Error("rfb_recusado"); }
   const tipos = await fila.ler(n);
-  const tipo = tipos.includes(2) ? 2 : tipos.includes(1) ? 1 : 0;
+  // O acesso traz uma senha VNC. Aceitar None quando o upstream omite VNC Auth seria downgrade silencioso.
+  const tipo = tipos.includes(2) ? 2 : 0;
   if (!tipo) throw new Error("rfb_seguranca_invalida");
   enviar(Buffer.from([tipo]));
   if (tipo === 2) enviar(respostaVnc(senha, await fila.ler(16)));
   if ((await fila.ler(4)).readUInt32BE() !== 0) throw new Error("rfb_autenticacao_falhou");
   enviar(Buffer.from([1]));
   const cabecalho = await fila.ler(24);
-  const nome = await fila.ler(cabecalho.readUInt32BE(20));
+  const tamanhoNome = cabecalho.readUInt32BE(20);
+  if (tamanhoNome > 4_096) throw new Error("rfb_nome_invalido");
+  const nome = await fila.ler(tamanhoNome);
   return Buffer.concat([cabecalho, nome]);
 }
 
@@ -100,7 +105,7 @@ export async function abrirOrigemRfb(acesso: AcessoTelaAoVivo, o: { criarSocket?
       if (etapa === "versao") {
         if (navegador.length < 12) return;
         const v = navegador.subarray(0, 12); navegador = navegador.subarray(12);
-        if (!/^RFB 003\.00[3-8]\n$/.test(v.toString("ascii"))) { ws.terminate(); return encerrar(); }
+        if (!/^RFB 003\.00[78]\n$/.test(v.toString("ascii"))) { ws.terminate(); return encerrar(); }
         etapa = "seguranca"; mandar(Buffer.from([1, 1]));
       } else if (etapa === "seguranca") {
         if (navegador.length < 1) return;

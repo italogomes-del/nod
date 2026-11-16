@@ -75,6 +75,7 @@ describe("relay RFB autenticado de provedor externo", () => {
       "wss://www.orgo.ai:8443/desktops/a/ws/websockify",
       "wss://senha@www.orgo.ai/desktops/a/ws/websockify",
       "wss://www.orgo.ai/desktops/a/ws/websockify?token=vazou",
+      "wss://www.orgo.ai/desktops/a/ws/websockify#token=vazou",
       "wss://www.orgo.ai/outro",
     ]) await expect(abrirOrigemRfb({ tipo: "vnc_websocket", url, token: SENHA, validoAte: null }, { criarSocket })).rejects.toThrow("origem_vnc_recusada");
     expect(criarSocket).not.toHaveBeenCalled();
@@ -83,5 +84,22 @@ describe("relay RFB autenticado de provedor externo", () => {
   it("mantém o vetor VNC Auth estável e valida só o endpoint público do Orgo", () => {
     expect(respostaVnc(SENHA, DESAFIO).toString("hex")).toBe("1631958ce99168dba3ffbb13a0a74ad2");
     expect(validarUrlVncExterna("wss://www.orgo.ai/desktops/a_B-2/ws/websockify").hostname).toBe("www.orgo.ai");
+  });
+
+  it("recusa downgrade para None e versões cujo handshake tem outro formato", async () => {
+    class UpstreamInseguro extends EventEmitter {
+      bufferedAmount = 0;
+      private readonly versao: string;
+      constructor(versao: string) { super(); this.versao = versao; queueMicrotask(() => { this.emit("open"); this.emit("message", Buffer.from(this.versao)); }); }
+      send(): void { this.emit("message", Buffer.from([1, 1])); }
+      close(): void { this.emit("close"); }
+      terminate(): void { this.emit("close"); }
+    }
+    for (const versao of ["RFB 003.003\n", "RFB 003.008\n"]) {
+      await expect(abrirOrigemRfb(
+        { tipo: "vnc_websocket", url: "wss://www.orgo.ai/desktops/pc-1/ws/websockify", token: SENHA, validoAte: null },
+        { criarSocket: () => new UpstreamInseguro(versao) as never },
+      )).rejects.toThrow(versao.includes("003.003") ? "rfb_versao_invalida" : "rfb_seguranca_invalida");
+    }
   });
 });

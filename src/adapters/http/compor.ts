@@ -750,7 +750,10 @@ export function comporApp(o: OpcoesCompor): App {
   // Computador ao vivo: o mesmo relay público atende o motor local e provedores externos com VNC WebSocket. Docker sem
   // VNC continua na mesma sala e cai com segurança para capturas; não se monta uma rota inútil quando nenhum deles existe.
   const configProvedoresLida = !o.computador && !computadorNoMotor ? configDeProvedores(env) : null;
-  const temVivoExterno = configProvedoresLida ? provedoresEmUso(configProvedoresLida.config).includes("orgo") : false;
+  // A escolha por env não basta para ligar uma integração de terceiro: a flag explícita continua desligada por padrão;
+  // a chave ainda é exigida por pessoa, diretamente do cofre, antes de qualquer chamada ao Orgo.
+  const orgoHabilitado = env.NOD_COMPUTADOR_ORGO === "1";
+  const temVivoExterno = orgoHabilitado && configProvedoresLida ? provedoresEmUso(configProvedoresLida.config).includes("orgo") : false;
   const sessoesVivo = computadorNoMotor || temVivoExterno ? criarSessoesVivo() : null;
   const driverMotor = canalComputador ? criarDriverMotor({
     env,
@@ -813,7 +816,7 @@ export function comporApp(o: OpcoesCompor): App {
     if (!emUso.length) return null;
     const provedores: Partial<Record<IdProvedorComputador, ProvedorDeComputador>> = {};
     if (emUso.includes("docker")) provedores.docker = criarProvedorDocker(env);
-    if (emUso.includes("orgo")) provedores.orgo = criarProvedorOrgo({ env, chaveDe: (escopo) => dentro(escopo, async (d) => {
+    if (orgoHabilitado && emUso.includes("orgo")) provedores.orgo = criarProvedorOrgo({ env, chaveDe: (escopo) => dentro(escopo, async (d) => {
       const c = await d.repos.conectores.buscarPorSlug("orgo");
       if (!c?.envCifrado) return null;
       const lido = JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, unknown>;

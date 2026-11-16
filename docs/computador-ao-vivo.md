@@ -8,6 +8,11 @@ motor mantém o transporte existente; o Orgo usa o mesmo WebSocket público, mas
 host, termina VNC Auth e oferece ao noVNC uma sessão sem senha. Queda, fila acima de 8 MiB, sessão revogada, tenant ou
 Origin errados e protocolo desconhecido fecham a conexão; a sala conserva o último quadro e volta a capturas.
 
+A integração Orgo fica desligada por padrão. Uma regra `NOD_COMPUTADOR_PROVEDOR*=orgo` sozinha não monta o provedor nem
+o relay: o servidor exige também `NOD_COMPUTADOR_ORGO=1`, e cada pessoa só alcança a rede depois de ter o conector
+privado `orgo` com `ORGO_API_KEY` cifrada no cofre. Sem qualquer uma dessas condições, falha fechado e usa o caminho
+local/fallback disponível.
+
 Docker e Orgo entram pelo mesmo `DriverComputador` e pela mesma sala. O Docker por bot ainda declara
 `telaAoVivo: "capturas"`: a tentativa de VNC é recusada e o viewer cai para capturas na própria sala. Isso prova o
 fallback local, não um stream contínuo do container. Transformar o socket VNC já interno ao runtime Docker numa origem
