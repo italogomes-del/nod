@@ -307,13 +307,8 @@ descrever("ADA-2 F5: conversa do celular (Chrome real)", () => {
 
     // Revisão do PR #703: a fala de vários balões (um por parágrafo) que abre com bloco de código. Todos os balões se escondem,
     // então todos ganham cópia; e as setas/Home andam só entre os itens do menu (o Copiar do código na cópia é inert).
-    const botLonga = await criarBot("Longa F5");
-    // A criação direta pela API não emite uma atualização da frota para a página já aberta.
-    await abrir(390, 844);
-    await ate(`document.querySelector('[data-bot-contexto="${botLonga.id}"]')`, "o bot novo na frota");
-    await abrirConversa(botLonga);
     const LONGA = "```\nx = 1\n```\n\nDepois do código, o parágrafo da fala longa.";
-    await srv.json("POST", `conversas/${botLonga.conversaId}/mensagens`, { texto: `Mais uma [[texto: ${LONGA}]]` });
+    await srv.json("POST", `conversas/${bot.conversaId}/mensagens`, { texto: `Mais uma [[texto: ${LONGA}]]` });
     const seletorDaLonga = `[...document.querySelectorAll("#timeline .message.bot[data-mensagem]")].find((m) => [...m.querySelectorAll(".bubble")].some((b) => b.textContent.includes("parágrafo da fala longa")))`;
     await ate(`(${seletorDaLonga})?.querySelectorAll(".bubble").length >= 2 && (${seletorDaLonga}).querySelector('[data-act="copiar-codigo"]')`, "a fala longa em balões, com o código", 25_000);
     await tocar(650, seletorDaLonga);
