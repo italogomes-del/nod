@@ -65,11 +65,19 @@ function lerPing(saida: string): Ping | null {
 const pausa = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 export const VNC_DOCKER_FILA_MAX_BYTES = 8 * 1024 * 1024;
 
+type ProcessoVnc = {
+  stdout: { on(evento: "data", fn: (bytes: Buffer) => void): unknown; on(evento: "error", fn: () => void): unknown };
+  stdin: { writableLength: number; on(evento: "error", fn: () => void): unknown; write(bytes: Buffer): unknown; end(): unknown };
+  on(evento: "error" | "close", fn: () => void): unknown;
+  kill(sinal: NodeJS.Signals): unknown;
+};
+type SpawnVnc = (comando: string, args: string[], opcoes: { stdio: ["pipe", "pipe", "pipe"] }) => ProcessoVnc;
+
 /**
  * NOD-496: liga o relay ao x11vnc pelo namespace do próprio container. `docker exec` não publica porta e o processo
  * interno só disca `/tmp/nod-vnc.sock`. Fechar qualquer ponta mata a ponte e, portanto, a sessão do x11vnc.
  */
-export function abrirVncDocker(id: string, spawnImpl: typeof spawn = spawn): Promise<FluxoTelaAoVivo> {
+export function abrirVncDocker(id: string, spawnImpl: SpawnVnc = spawn): Promise<FluxoTelaAoVivo> {
   if (!/^[a-f0-9-]{36}$/.test(id)) return Promise.reject(new ErroDeDominio("entrada_invalida"));
   const p = spawnImpl("docker", ["exec", "-i", `nod-computador-${id}`, "node", "/opt/nod/vnc-bridge.mjs"], { stdio: ["pipe", "pipe", "pipe"] });
   let dados: ((bytes: Uint8Array) => void) | null = null;
