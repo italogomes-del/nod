@@ -234,11 +234,11 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     expect(await existe("#timeline li.decisao.aprov-card[data-decisao]")).toBe(false);
     expect(readFileSync(arquivoGravar, "utf8")).toBe("");
 
-    // (c) Permitir uma vez: faz e encolhe em "Aprovado por você · feito HH:MM".
+    // (c) Permitir uma vez: faz e encolhe com o mesmo verbo do botão.
     await falar(bot, `Grave "dois". [[tool: pedir_aprovacao ${pedirGravar("dois")}]] [[texto: gravei]]`);
     await ate(`document.querySelector("#timeline li.decisao.aprov-card[data-decisao]")`, "o 2º cartão");
     await clicar('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao"]');
-    await ate(`[...document.querySelectorAll("#timeline .cartao-encolhido .ce-resultado")].some((e) => /^Aprovado por você · feito \\d\\d:\\d\\d$/.test(e.textContent))`, "a linha de aprovado");
+    await ate(`[...document.querySelectorAll("#timeline .cartao-encolhido .ce-resultado")].some((e) => e.textContent === "Permitido uma vez")`, "a linha de aprovado");
     for (let t = 0; t < 50 && !readFileSync(arquivoGravar, "utf8").includes("dois"); t++) await espera(100);
     expect(readFileSync(arquivoGravar, "utf8")).toContain("dois");
 
@@ -295,7 +295,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     expect(await avaliar<boolean>(cdp, `document.querySelector("#timeline input[data-cr-regra-marca]").checked`)).toBe(true);
     expect(await texto("#timeline li.cartao-revisor .cr-regra-marca span")).toBe("Salvar como regra");
     expect(await avaliar<string>(cdp, `document.querySelector("#timeline input[data-cr-regra-texto]").value`)).toBe("Pode gravar notas no Gravador sem perguntar");
-    await avaliar(cdp, `(() => { const i = document.querySelector("#timeline input[data-cr-regra-texto]"); i.value = "Pode gravar notas do teste no Gravador"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await avaliar(cdp, `(() => { const i = document.querySelector("#timeline input[data-cr-regra-texto]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, "Pode gravar notas do teste no Gravador"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await clicar('#timeline [data-act="decidir-aprovacao-com-regra"]');
     await ateGravar("regra-1");
     const ajustes = await srv.json<{ regras: { doBot: { id: string; lista: string; texto: string; origem: string }[] } }>("GET", `aprovacoes/ajustes?agente=${bot.id}`);
@@ -307,7 +307,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await falar(bot, `Grave "regra-2". [[tool: gravador__gravar {"texto":"regra-2"}]] [[texto: gravei regra-2]]`);
     await ateGravar("regra-2");
     await ate(`document.querySelector("#timeline .linha-modo.linha-regra [data-act='apv-editar-da-linha']")`, "a linha da regra");
-    expect(await texto("#timeline .linha-modo.linha-regra .linha-modo-txt")).toBe("Aprovado pela sua regra · Pode gravar notas do teste no Gravador");
+    expect(await texto("#timeline .linha-modo.linha-regra .linha-modo-txt")).toBe("Revisor liberou gravar no gravador: a sua regra deixa · Aprovado pela sua regra");
     expect(await texto("#timeline .linha-modo.linha-regra [data-act='apv-editar-da-linha']")).toBe("Editar");
     expect(await avaliar<string | null>(cdp, `document.querySelector("#timeline [data-act='apv-editar-da-linha']").dataset.regra`)).toBe(salva?.id);
     // Editar abre Configurações › Aprovações com a regra em edição.
