@@ -5710,7 +5710,7 @@ async function enviarRascunhos(el: HTMLElement, enviar: boolean): Promise<void> 
     const itens = enviar ? marcas : itensDaRecusa(marcas, estado.suaVez?.itens.find((i) => i.decisao.id === id)?.itensAprovacao ?? []);
     if (!itens || itens.length === 0) continue;
     marcarDecidida(el, id);
-    await api!.decidir(id, { itens });
+    await decidirAprovacaoReconciliando(id, { itens });
   }
   dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
 }
@@ -7441,7 +7441,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const marca = document.querySelector<HTMLInputElement>(`[data-cr-regra-marca="${CSS.escape(id)}"]`);
     const texto = document.querySelector<HTMLInputElement>(`[data-cr-regra-texto="${CSS.escape(id)}"]`)?.value.trim() ?? "";
     marcarDecidida(el, id);
-    await api!.decidir(id, { itens: marcacoesDe(id) });
+    await decidirAprovacaoReconciliando(id, { itens: marcacoesDe(id) });
     if (marca?.checked && texto && el.dataset.agente) {
       try {
         await api!.criarRegraRevisor({ agenteId: el.dataset.agente, lista: "permitir", texto, origem: "sugestao" });
@@ -7455,13 +7455,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "iguais-permitir": (el) => agir(async () => {
     const card = el.closest<HTMLElement>(".aprov-iguais");
     const ids = [...(card?.querySelectorAll<HTMLInputElement>("input[data-igual]") ?? [])].filter((c) => c.checked).map((c) => c.dataset.igual ?? "").filter(Boolean);
-    for (const id of ids) await api!.decidir(id, { itens: [] });
+    for (const id of ids) await decidirAprovacaoReconciliando(id, { itens: [] });
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
   }),
   "iguais-negar": (el) => agir(async () => {
     for (const id of (el.dataset.iguais ?? "").split(",").filter(Boolean)) {
       const itens = itensDaRecusa([], estado.suaVez?.itens.find((i) => i.decisao.id === id)?.itensAprovacao ?? []);
-      if (itens) await api!.decidir(id, { itens });
+      if (itens) await decidirAprovacaoReconciliando(id, { itens });
     }
     dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
   }),
