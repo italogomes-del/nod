@@ -183,9 +183,9 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await clicar(".ap-pular"); await noPasso(9);
     // Criar: o nome sugerido pela função, forma e cor (sem o preto), e a primeira mensagem.
     expect(await existe('.cb-cores [data-cor="c-black"]')).toBe(false);
-    await clicar('.cb-forma[title="Estrela"]');
+    await clicar('.cb-forma[title="Gota"]');
     await clicar('.cb-cor[title="Verde"]');
-    await ate(`document.querySelector('.cb-forma[title="Estrela"]')?.getAttribute("aria-checked") === "true" && document.querySelector('.cb-cor[title="Verde"]')?.getAttribute("aria-checked") === "true"`, "forma e cor escolhidas");
+    await ate(`document.querySelector('.cb-forma[title="Gota"]')?.getAttribute("aria-checked") === "true" && document.querySelector('.cb-cor[title="Verde"]')?.getAttribute("aria-checked") === "true"`, "forma e cor escolhidas");
     await avaliar(cdp, `(() => { const t = document.querySelector('textarea[data-campo-apres="primeira"]'); t.value = "Organize as ideias desta semana [[texto: Organizei as ideias]]"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await clicar(".ap-enviar");
     // Preparando: a barra com % sobe até 100 e o personagem comemora; depois, a conversa do bot novo.
@@ -204,7 +204,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await ate(`!document.querySelector(".ap-camada") && document.getElementById("composer-texto")`, "a conversa do bot novo");
     const frota = await srv.json<{ agentes: { id: string; nome: string; forma: string; cor: string; conversaId: string }[] }>("GET", "frota");
     const lia = frota.agentes.find((a) => a.nome === "Lia");
-    expect(lia).toMatchObject({ forma: "shape-star", cor: "c-green" });
+    expect(lia).toMatchObject({ forma: "shape-drop", cor: "c-green" });
     if (lia) { agentes.push(lia.id); conversas.push(lia.conversaId); }
     // A primeira mensagem do passo 9 foi para o bot novo (e ele respondeu).
     if (lia) await ateResponder(lia, "Organizei as ideias");
@@ -448,7 +448,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await buscar("novo", "Ações");
     // Enter no ajuste leva às Configurações já na linha.
     await buscar("tema", "Ajustes");
-    await clicar('.paleta .paleta-grupo[aria-label="Ajustes"] .paleta-item');
+    await avaliar(cdp, `(() => { const b = [...document.querySelectorAll('.paleta .paleta-grupo[aria-label="Ajustes"] .paleta-item b')].find((e) => e.textContent === "Tema"); if (!b) throw new Error("não achei o ajuste Tema"); b.closest(".paleta-item").click(); })()`);
     await ate(`document.getElementById("ajuste-tema")`, "a linha Tema");
     await tecla("Escape", { vk: 27 });
     await abrirApp();
@@ -515,7 +515,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 8 ————————————————————————————————————————————————
   it("8. criar bot com cor e forma, e o preparo com %", { timeout: JORNADA }, async () => {
     await abrirApp();
-    await avaliar(cdp, `(() => { const b = [...document.querySelectorAll('.create-trigger[data-act="novo-bot-dialogo"]')].find((el) => el.getClientRects().length); if (!b) throw new Error("não achei o Novo bot visível"); b.click(); })()`);
+    await tecla("n", { code: "KeyN", vk: 78, mod: 1 });
     await ate(`document.querySelector("dialog.criar-bot[open] .cb-nome")`, "o modal Criar novo bot");
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-formas [role=radio][data-forma]').length`)).toBe(13);
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-cores [role=radio][data-cor]').length`)).toBe(14);
