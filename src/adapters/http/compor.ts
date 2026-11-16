@@ -747,13 +747,14 @@ export function comporApp(o: OpcoesCompor): App {
     chavesDasMaquinas.set(maquinaId, chave);
     barramento.publicar(escopo.pessoaId, "computador.estado", dados);
   } }) : null;
-  // Computador ao vivo: o mesmo relay público atende o motor local e provedores externos com VNC WebSocket. Docker sem
-  // VNC continua na mesma sala e cai com segurança para capturas; não se monta uma rota inútil quando nenhum deles existe.
+  // Computador ao vivo: o mesmo relay público atende o motor local, o Docker e provedores externos com VNC WebSocket;
+  // não se monta uma rota inútil quando nenhum deles existe.
   const configProvedoresLida = !o.computador && !computadorNoMotor ? configDeProvedores(env) : null;
   // A escolha por env não basta para ligar uma integração de terceiro: a flag explícita continua desligada por padrão;
   // a chave ainda é exigida por pessoa, diretamente do cofre, antes de qualquer chamada ao Orgo.
   const orgoHabilitado = env.NOD_COMPUTADOR_ORGO === "1";
-  const temVivoExterno = orgoHabilitado && configProvedoresLida ? provedoresEmUso(configProvedoresLida.config).includes("orgo") : false;
+  const provedoresEmUsoAgora = configProvedoresLida ? provedoresEmUso(configProvedoresLida.config) : [];
+  const temVivoExterno = (orgoHabilitado && provedoresEmUsoAgora.includes("orgo")) || provedoresEmUsoAgora.includes("docker");
   const sessoesVivo = computadorNoMotor || temVivoExterno ? criarSessoesVivo() : null;
   const driverMotor = canalComputador ? criarDriverMotor({
     env,
