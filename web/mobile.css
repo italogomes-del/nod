@@ -241,6 +241,8 @@
   .bubble { font-size: 15px; }
   .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .card-pasta, .welcome-options,
   .liberar-card { margin-left: 0; max-width: 100%; }
+  .workspace-dialogo button { min-width: 44px; min-height: 44px; }
+  .workspace-dialogo input { min-height: 44px; }
   .bubble pre, .msg-peer pre { max-width: 100%; }
   /* As ações da fala (reagir, responder, reportar e ⋯; ADR-113) só aparecem depois de um toque nela (web/lib/gaveta-bots.ts),
      dentro da coluna, nunca ao lado, com alvos de 44 px: no toque, o ⋯ fica sempre à vista junto das outras. */
