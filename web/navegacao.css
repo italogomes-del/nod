@@ -19,6 +19,9 @@
    dois casos o hover velho sai; ao soltar, a linha sob o ponteiro acende. O selecionado fica. */
 #sidebar:is(.arrastando-bot, [data-sem-hover]) :is(.bot-row:not(.hover-no-ponto):not(:has(> .row[aria-current="true"])), .fixado-bt:not([aria-current="true"]), .novo-time):hover { background: none; }
 #sidebar .bot-row.hover-no-ponto, #sidebar .fixado.hover-no-ponto > .fixado-bt:not([aria-current="true"]) { background: var(--hover); }
+#sidebar:is(.arrastando-bot, [data-sem-hover]) .secao-cab:hover:not(:focus-visible) { color: inherit; }
+#sidebar:is(.arrastando-bot, [data-sem-hover]) :is(.secao-cab:hover, .time-cab:hover .secao-cab)[aria-expanded="true"]:not(:focus-visible) > svg { opacity: 0; }
+#sidebar:is(.arrastando-bot, [data-sem-hover]) .time-cab:hover:not(:focus-within) .time-mais:not([aria-expanded="true"]) { opacity: 0; }
 .fixados[data-vazio], .section[data-vazio] { display: none; }
 .arrastando-bot .fixados[data-vazio] { display: grid; }
 .fixados-vazio { grid-column: 1 / -1; margin: 0; padding: 18px 12px; border: 1.5px dashed var(--line-strong); border-radius: var(--raio-14); text-align: center;
@@ -36,7 +39,7 @@
 .fantasma-bot-legenda { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-rotulo); line-height: var(--lh-rotulo);
   font-weight: 400; letter-spacing: .12px; color: var(--ink); }
 @media (prefers-reduced-motion: no-preference) {
-  .fantasma-bot { animation: fantasma-bot-cresce .2s cubic-bezier(.25, 1.15, .4, 1) both; }
+  .fantasma-bot { animation: fantasma-bot-cresce .2s cubic-bezier(.22, 1, .36, 1) both; }
   .fantasma-bot::before { animation: fantasma-bot-aparece .2s cubic-bezier(.22, 1, .36, 1) both; }
 }
 @keyframes fantasma-bot-cresce { from { transform: scale(1); } to { transform: scale(1.04); } }

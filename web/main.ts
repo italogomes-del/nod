@@ -10211,7 +10211,10 @@ function soltarBot(id: string, destino: Destino, indice: number): void {
   // Sem o `ocupado` do agir(): a barra já mudou na hora, e o cursor de espera anunciaria uma espera que não existe.
   avisador.acaoPropria();
   dispatch({ tipo: "erro", erro: null });
-  void mudarGestao(() => api!.organizarAgente(id, destino.grupo === "fixados" ? { fixado: true, ordem } : { fixado: false, secao: destino.secao, ordem })).catch(mostrarErro);
+  void mudarGestao(() => api!.organizarAgente(id, destino.grupo === "fixados" ? { fixado: true, ordem } : { fixado: false, secao: destino.secao, ordem })).catch(() => {
+    // mudarGestao já mostrou o erro; a barra volta ao que o servidor tem.
+    dispatch({ tipo: "invalidar", quais: ["frota"] });
+  });
 }
 
 /**
