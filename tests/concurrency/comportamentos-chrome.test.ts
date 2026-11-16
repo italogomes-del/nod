@@ -136,24 +136,15 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
 
   /** O item 10 roda o onboarding pela tela; os outros entram com ele concluído (como quem já passou por ele). */
   let onboardingConcluido = false;
-  let navegacao = 0;
-  async function navegar(hash = ""): Promise<void> {
-    const url = new URL(`${srv.url}/${hash}`);
-    const marcador = String(++navegacao);
-    url.searchParams.set("e2e", marcador);
-    await cdp.enviar("Page.navigate", { url: url.href });
-    await espera(100);
-    await ate(`new URL(location.href).searchParams.get("e2e") === "${marcador}"`, "a página nova");
-  }
   async function abrirApp(hash = ""): Promise<void> {
     if (!onboardingConcluido) { await srv.json("POST", "onboarding/concluir", {}); onboardingConcluido = true; }
-    await navegar(hash);
+    await cdp.enviar("Page.navigate", { url: `${srv.url}/${hash}` });
     await ate(`document.querySelector('[data-act="abrir-conversa"]')`, "a lista de bots");
   }
 
   async function abrirConversa(bot: { id: string }): Promise<void> {
     await clicar(`[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"]`);
-    await ate(`document.querySelector('[data-bot-contexto="${bot.id}"] [data-act="abrir-conversa"][aria-current="true"]') && document.getElementById("composer-texto")`, "a conversa");
+    await ate(`document.getElementById("composer-texto")`, "a conversa");
   }
 
   /** A fala da pessoa pela API (o catcher lê as marcas [[tool: …]]); a tela recebe pelo SSE, como de verdade. */
@@ -167,38 +158,38 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 10 ———————————————————————————————————————————————
   it("10. onboarding inteiro em 10 passos: boas-vindas → … → criar (cor e forma) → preparando com %", { timeout: JORNADA }, async () => {
     // Antes de qualquer outro: a pessoa nova, sem o onboarding concluído.
-    await navegar();
+    await cdp.enviar("Page.navigate", { url: `${srv.url}/` });
     // O passo pelo nome (os 10 de PASSOS em web/telas/apresentacao.ts); onde há os pontos, "Passo N de 10".
     const PASSOS = ["boas-vindas", "conhecer", "computador", "trabalho", "delegar", "funcao", "origem", "apps", "criar", "preparando"];
     const noPasso = (n: number) => ate(`document.querySelector(".ap-camada section.ap.ap-${PASSOS[n - 1]}") && (!document.querySelector(".ap-camada .ap-pontos") || document.querySelector(".ap-camada .ap-pontos").getAttribute("aria-label") === "Passo ${n} de 10")`, `o passo ${n} de 10 (${PASSOS[n - 1]})`);
     await noPasso(1);
-    const seguir = () => clicar(".ap-seguir, .ap-entrar");
+    const seguir = () => clicar('[data-act="apres-seguir"]');
     const mascote = () => avaliar<string | null>(cdp, `document.querySelector(".ap-camada .ap-personagem nod-mascote, .ap-camada .cb-preparo-topo nod-mascote, .ap-camada .cb-preparo nod-mascote")?.dataset.estado ?? null`);
     await seguir(); await noPasso(2);
     // Voltar funciona (o ‹).
-    await clicar(".ap-voltar"); await noPasso(1);
+    await clicar('[data-act="apres-voltar"]'); await noPasso(1);
     await seguir(); await noPasso(2);
     await seguir(); await noPasso(3);
     await seguir(); await noPasso(4);
     await seguir(); await noPasso(5);
     await seguir(); await noPasso(6);
-    // Função e origem são as telas de pergunta, sem personagem (Paper 13).
-    await avaliar(cdp, `[...document.querySelectorAll(".ap-fichas .ap-ficha")].find((b) => b.textContent === "Produto").click()`);
+    // Função: pensa até escolher; escolhida, comemora.
+    expect(await mascote()).toBe("pensando");
+    await clicar('[data-act="apres-escolher"][data-campo="funcao"][data-valor="Produto"]');
+    await ate(`document.querySelector(".ap-camada .ap-personagem nod-mascote")?.dataset.estado === "comemorando"`, "o personagem comemorando a função");
     await seguir(); await noPasso(7);
-    await avaliar(cdp, `[...document.querySelectorAll(".ap-fichas .ap-ficha")].find((b) => b.textContent === "Amigo ou colega").click()`);
+    await clicar('[data-act="apres-escolher"][data-campo="origem"][data-valor="Amigo ou colega"]');
     await seguir(); await noPasso(8);
     // Conectar apps: pular (sem contas aqui).
-    expect(await existe(".ap-app .bt")).toBe(true);
-    await clicar(".ap-pular"); await noPasso(9);
+    expect(await existe('[data-act="apres-conectar"]')).toBe(true);
+    await clicar('[data-act="apres-pular"]'); await noPasso(9);
     // Criar: o nome sugerido pela função, forma e cor (sem o preto), e a primeira mensagem.
     expect(await existe('.cb-cores [data-cor="c-black"]')).toBe(false);
-    await clicar('.cb-forma[title="Gota"]');
-    await clicar('.cb-cor[title="Verde"]');
-    await ate(`document.querySelector('.cb-forma[title="Gota"]')?.getAttribute("aria-checked") === "true" && document.querySelector('.cb-cor[title="Verde"]')?.getAttribute("aria-checked") === "true"`, "forma e cor escolhidas");
-    await avaliar(cdp, `(() => { const t = document.querySelector('textarea[data-campo-apres="primeira"]'); t.focus(); t.select(); })()`);
-    await cdp.enviar("Input.insertText", { text: "Organize as ideias desta semana [[texto: Organizei as ideias]]" });
-    await ate(`document.querySelector('textarea[data-campo-apres="primeira"]')?.value === "Organize as ideias desta semana [[texto: Organizei as ideias]]"`, "a primeira mensagem digitada");
-    await clicar(".ap-enviar");
+    await clicar('[data-act="apres-forma"][data-forma="shape-star"]');
+    await clicar('[data-act="apres-cor"][data-cor="c-green"]');
+    await ate(`document.querySelector('[data-act="apres-forma"][data-forma="shape-star"]')?.getAttribute("aria-checked") === "true" && document.querySelector('[data-act="apres-cor"][data-cor="c-green"]')?.getAttribute("aria-checked") === "true"`, "forma e cor escolhidas");
+    await avaliar(cdp, `(() => { const t = document.querySelector('textarea[data-campo-apres="primeira"]'); t.value = "Organize as ideias desta semana [[texto: Organizei as ideias]]"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await clicar('[data-act="apres-criar"]');
     // Preparando: a barra com % sobe até 100 e o personagem comemora; depois, a conversa do bot novo.
     await noPasso(10);
     await ate(`document.querySelector(".ap-camada .cb-barra[role=progressbar]")`, "a barra do preparo");
@@ -215,7 +206,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await ate(`!document.querySelector(".ap-camada") && document.getElementById("composer-texto")`, "a conversa do bot novo");
     const frota = await srv.json<{ agentes: { id: string; nome: string; forma: string; cor: string; conversaId: string }[] }>("GET", "frota");
     const lia = frota.agentes.find((a) => a.nome === "Lia");
-    expect(lia).toMatchObject({ forma: "shape-drop", cor: "c-green" });
+    expect(lia).toMatchObject({ forma: "shape-star", cor: "c-green" });
     if (lia) { agentes.push(lia.id); conversas.push(lia.conversaId); }
     // A primeira mensagem do passo 9 foi para o bot novo (e ele respondeu).
     if (lia) await ateResponder(lia, "Organizei as ideias");
@@ -224,8 +215,6 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
 
   // ———————————————————————————————————————————————— 1 ————————————————————————————————————————————————
   it("1. cartão de aprovação: Permitir uma vez · Sempre permitir · Negar (Esc); decidido, encolhe numa linha de status", { timeout: JORNADA }, async () => {
-    // A suíte repete falhas uma vez; o arquivo do MCP precisa começar limpo também na repetição.
-    writeFileSync(arquivoGravar, "");
     const bot = await criarBot("Cartão Teste", "manual", [{ conectorId: conectorGravar, capacidade: "gravar" }]);
     await abrirApp();
     await abrirConversa(bot);
@@ -245,20 +234,20 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     expect(await existe("#timeline li.decisao.aprov-card[data-decisao]")).toBe(false);
     expect(readFileSync(arquivoGravar, "utf8")).toBe("");
 
-    // (c) Permitir uma vez: faz e encolhe com o mesmo verbo do botão.
+    // (c) Permitir uma vez: faz e encolhe em "Aprovado por você · feito HH:MM".
     await falar(bot, `Grave "dois". [[tool: pedir_aprovacao ${pedirGravar("dois")}]] [[texto: gravei]]`);
     await ate(`document.querySelector("#timeline li.decisao.aprov-card[data-decisao]")`, "o 2º cartão");
     await clicar('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao"]');
-    await ate(`[...document.querySelectorAll("#timeline .cartao-encolhido .ce-resultado")].some((e) => e.textContent === "Permitido uma vez")`, "a linha de aprovado");
+    await ate(`[...document.querySelectorAll("#timeline .cartao-encolhido .ce-resultado")].some((e) => /^Aprovado por você · feito \\d\\d:\\d\\d$/.test(e.textContent))`, "a linha de aprovado");
     for (let t = 0; t < 50 && !readFileSync(arquivoGravar, "utf8").includes("dois"); t++) await espera(100);
     expect(readFileSync(arquivoGravar, "utf8")).toContain("dois");
 
-    // (d) Sempre permitir: encolhe em "Permitido sempre:" e o próximo igual
+    // (d) Sempre permitir: encolhe em "Permitido daqui em diante" e o próximo igual
     // não pede mais.
     await falar(bot, `Grave "três". [[tool: pedir_aprovacao ${pedirGravar("três")}]] [[texto: gravei]]`);
     await ate(`document.querySelector("#timeline li.decisao.aprov-card[data-decisao]")`, "o 3º cartão");
     await clicar('#timeline li.decisao.aprov-card [data-act="decidir-aprovacao-sempre"]');
-    await ate(`[...document.querySelectorAll("#timeline .cartao-encolhido .ce-resultado")].some((e) => e.textContent === "Permitido sempre:")`, "a linha da regra");
+    await ate(`[...document.querySelectorAll("#timeline .cartao-encolhido .ce-resultado")].some((e) => e.textContent === "Permitido daqui em diante")`, "a linha da regra");
     await falar(bot, `Grave "quatro". [[tool: pedir_aprovacao ${pedirGravar("quatro")}]] [[texto: gravei quatro]]`);
     for (let t = 0; t < 100 && !readFileSync(arquivoGravar, "utf8").includes("quatro"); t++) await espera(100);
     expect(readFileSync(arquivoGravar, "utf8")).toContain("quatro");
@@ -306,7 +295,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     expect(await avaliar<boolean>(cdp, `document.querySelector("#timeline input[data-cr-regra-marca]").checked`)).toBe(true);
     expect(await texto("#timeline li.cartao-revisor .cr-regra-marca span")).toBe("Salvar como regra");
     expect(await avaliar<string>(cdp, `document.querySelector("#timeline input[data-cr-regra-texto]").value`)).toBe("Pode gravar notas no Gravador sem perguntar");
-    await avaliar(cdp, `(() => { const i = document.querySelector("#timeline input[data-cr-regra-texto]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, "Pode gravar notas do teste no Gravador"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await avaliar(cdp, `(() => { const i = document.querySelector("#timeline input[data-cr-regra-texto]"); i.value = "Pode gravar notas do teste no Gravador"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await clicar('#timeline [data-act="decidir-aprovacao-com-regra"]');
     await ateGravar("regra-1");
     const ajustes = await srv.json<{ regras: { doBot: { id: string; lista: string; texto: string; origem: string }[] } }>("GET", `aprovacoes/ajustes?agente=${bot.id}`);
@@ -318,7 +307,7 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     await falar(bot, `Grave "regra-2". [[tool: gravador__gravar {"texto":"regra-2"}]] [[texto: gravei regra-2]]`);
     await ateGravar("regra-2");
     await ate(`document.querySelector("#timeline .linha-modo.linha-regra [data-act='apv-editar-da-linha']")`, "a linha da regra");
-    expect(await texto("#timeline .linha-modo.linha-regra .linha-modo-txt")).toBe("Revisor liberou gravar no gravador: a sua regra deixa · Aprovado pela sua regra");
+    expect(await texto("#timeline .linha-modo.linha-regra .linha-modo-txt")).toBe("Aprovado pela sua regra · Pode gravar notas do teste no Gravador");
     expect(await texto("#timeline .linha-modo.linha-regra [data-act='apv-editar-da-linha']")).toBe("Editar");
     expect(await avaliar<string | null>(cdp, `document.querySelector("#timeline [data-act='apv-editar-da-linha']").dataset.regra`)).toBe(salva?.id);
     // Editar abre Configurações › Aprovações com a regra em edição.
@@ -449,17 +438,17 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
     for (const g of ["Bots", "Ações"]) expect(grupos).toContain(g);
     const buscar = async (termo: string, grupo: string) => {
       // Digita de novo a cada volta (como quem digita): o grupo Conversas pode chegar depois de a paleta abrir.
-      const digitar = `(() => { const i = document.getElementById("paleta-termo"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(termo)}); i.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`;
+      const digitar = `(() => { const i = document.getElementById("paleta-termo"); i.value = ${JSON.stringify(termo)}; i.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`;
       const achou = `[...document.querySelectorAll('.paleta .paleta-grupo[aria-label="${grupo}"] .paleta-item')].some((e) => e.textContent.toLowerCase().includes(${JSON.stringify(termo.toLowerCase())}))`;
       await ate(`${digitar} && ${achou}`, `"${termo}" em ${grupo}`);
     };
     await buscar("Atalhos Teste", "Bots");
     await buscar("tema", "Ajustes");
     await buscar("Vendas da semana", "Conversas");
-    await buscar("novo", "Ações");
+    await buscar("nova", "Ações");
     // Enter no ajuste leva às Configurações já na linha.
     await buscar("tema", "Ajustes");
-    await avaliar(cdp, `(() => { const b = [...document.querySelectorAll('.paleta .paleta-grupo[aria-label="Ajustes"] .paleta-item b')].find((e) => e.textContent === "Tema"); if (!b) throw new Error("não achei o ajuste Tema"); b.closest(".paleta-item").click(); })()`);
+    await clicar('.paleta .paleta-grupo[aria-label="Ajustes"] .paleta-item');
     await ate(`document.getElementById("ajuste-tema")`, "a linha Tema");
     await tecla("Escape", { vk: 27 });
     await abrirApp();
@@ -526,12 +515,14 @@ descrever("nod: comportamentos (app inteiro, Chrome real)", () => {
   // ———————————————————————————————————————————————— 8 ————————————————————————————————————————————————
   it("8. criar bot com cor e forma, e o preparo com %", { timeout: JORNADA }, async () => {
     await abrirApp();
-    await clicar('[data-act="novo-bot-dialogo"]');
+    await clicar('.create-trigger[data-tela="novo-bot"]');
+    await ate(`document.querySelector('[data-act="criar-rapido"]')`, "Criar novo bot");
+    await clicar('[data-act="criar-rapido"]');
     await ate(`document.querySelector("dialog.criar-bot[open] .cb-nome")`, "o modal Criar novo bot");
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-formas [role=radio][data-forma]').length`)).toBe(13);
     expect(await avaliar<number>(cdp, `document.querySelectorAll('dialog.criar-bot .cb-cores [role=radio][data-cor]').length`)).toBe(14);
     expect(await avaliar<boolean>(cdp, `document.querySelector('dialog.criar-bot [data-cb="criar"]').disabled`)).toBe(true);
-    await avaliar(cdp, `(() => { const i = document.querySelector("dialog.criar-bot .cb-nome"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, "Bolota"); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await avaliar(cdp, `(() => { const i = document.querySelector("dialog.criar-bot .cb-nome"); i.value = "Bolota"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await clicar('dialog.criar-bot [data-forma="shape-heart"]');
     await clicar('dialog.criar-bot [data-cor="c-purple"]');
     await ate(`document.querySelector('dialog.criar-bot [data-forma="shape-heart"]').getAttribute("aria-checked") === "true" && document.querySelector('dialog.criar-bot [data-cor="c-purple"]').getAttribute("aria-checked") === "true"`, "forma e cor marcadas");
