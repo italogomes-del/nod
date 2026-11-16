@@ -149,7 +149,8 @@ describe("NOD-383: criarRapido só cria quando a pessoa confirma", () => {
 
   it("main.ts: só o + segurado pergunta; o toque em 'Criar novo bot' cria direto", () => {
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
-    expect(main).toContain('data-segurar="segurar-mais"');
+    expect(main.match(/data-segurar="segurar-mais"/g)).toHaveLength(2);
+    expect(main).toMatch(/inicio-topo-acoes[\s\S]{0,500}data-segurar="segurar-mais"/);
     expect(main).toContain('"segurar-mais": () => void criarRapido(celular.ativo(), () => confirmarCriarBot(LOGO_NOD), criarBotAgora),');
     expect(main).toContain('"criar-rapido": () => criarBotAgora(),');
   });
