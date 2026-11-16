@@ -156,6 +156,26 @@ html[data-largura="recolhida"] .sidebar .me-nome { display: none; }
 .timeline .message.bot .bubble-wrap { max-width: 600px; }
 .timeline .message.bot .bubble:not(.com-progresso) { padding: 7px 14px; font-size: var(--fs-corpo); line-height: var(--lh-conversa); color: var(--balao-bot-tinta); }
 .timeline .message.bot .bubble + .bubble { margin-top: 10px; }
+/* Item 10, rodada 2 (2026-11-16): os cartões da conversa seguem a coluna do bot. O recuo de 52 px era o do mascote ao lado
+   da fala, que saiu daqui (regra de cima); sem ele o cartão começava 52 px para dentro e grudava no balão de quem pediu
+   (margem de cima negativa). Agora: mesma borda esquerda e mesma largura (560) da fala do bot, e o respiro de uma fala. */
+.timeline .decisoes-ancoradas { margin: 16px 0 18px; width: min(560px, 100%); }
+.timeline :is(.cp, .cp-linha, .cp-erro) { --cp-recuo: 0px; }
+/* O recibo do pedido decidido ("Permitido uma vez · …") tinha margem de cima negativa (-6) e entrava 4 px no balão da
+   fala de cima, que aqui tem fundo. Agora: 10 px abaixo do balão, e um recibo logo abaixo do outro a 10 px (as falas
+   seguintes já trazem os 16 px delas). */
+.timeline .cp-linha.cartao-encolhido, .timeline .cp-linha.cartao-encolhido.cp-com-extra { margin: 10px 0 0; }
+/* O cartão do terminal e do computador (rodada 2): o comando numa linha, o inteiro atrás de "Ver o comando"; o porquê curto. */
+.aprov-card .bt.aprov-fechar { margin-left: auto; }
+.aprov-card .ap-comando.ap-uma-linha { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.aprov-card .ap-comando-longo { margin: 12px 16px 0; }
+.aprov-card .ap-comando-longo > summary { display: flex; flex-direction: column; gap: 6px; list-style: none; cursor: pointer; }
+.aprov-card .ap-comando-longo > summary::-webkit-details-marker { display: none; }
+.aprov-card .ap-comando-longo > summary .ap-comando { margin: 0; }
+.aprov-card .ap-comando-longo .ap-ver { font-size: var(--fs-corpo-2); color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.aprov-card .ap-comando-longo[open] > summary .ap-comando { display: none; }
+.aprov-card .ap-comando-longo[open] > pre.ap-comando { margin: 6px 0 0; }
+.aprov-card .ap-porque.ap-porque-curto { margin-top: 10px; }
 
 /* =====================================================================================
    Campo de mensagem: 680 px, raio 22, ＋ | texto | 🎤 | ↑ (o anexo, o modo e a IA moram no ＋)
@@ -168,7 +188,24 @@ html[data-largura="recolhida"] .sidebar .me-nome { display: none; }
   transition: border-color var(--dur-normal) ease;
 }
 .composer .box:focus-within { border-color: var(--campo-borda-foco); }
-.composer .box > :is(.clipe, #composer-modo, #composer-ia) { display: none; }
+.composer .box > .clipe { display: none; }
+/* Acessos do campo (3c): a IA e o modo voltam ao campo, entre o texto e o 🎤 (o anexo segue no ＋). Com mouse, em repouso
+   ficam no lugar mas escondidos — o lugar é guardado, então nada pula quando aparecem, e o visibility hidden os tira do
+   Tab; no hover e no foco do campo aparecem (Tab: texto → IA → modo → 🎤 → enviar). Sem mouse fino (tela de toque
+   grande), ficam sempre à vista. Com o menu de um aberto, os dois ficam (o foco foi para o menu, fora do campo, e o
+   outro sumia deixando o buraco do lugar guardado). 3a: "Ignorar todas as aprovações" ligado fica sempre à vista, fora do hover. */
+@media (hover: hover) and (pointer: fine) {
+  .composer .box > :is(#composer-ia, #composer-modo) {
+    visibility: hidden; opacity: 0; transition: opacity var(--dur-normal) ease, visibility 0s linear var(--dur-normal);
+  }
+  .composer .box:is(:hover, :focus-within) > :is(#composer-ia, #composer-modo),
+  .composer .box:has(> :is(#composer-ia, #composer-modo)[aria-expanded="true"]) > :is(#composer-ia, #composer-modo) {
+    visibility: visible; opacity: 1; transition-delay: 0s;
+  }
+  /* 3a: com "Ignorar todas as aprovações" ligado o chip âmbar (interface.css) fica sempre à vista, para a dona e para
+     quem conversa com o bot dela — o aviso de risco não depende do hover; a IA ao lado continua só no hover e no foco. */
+  .composer .box > #composer-modo[data-modo="total"] { visibility: visible; opacity: 1; transition-delay: 0s; }
+}
 .composer .box > .mais-campo {
   display: grid; place-items: center; width: 30px; height: 30px; flex: none; padding: 0; margin: 0; border: 0; border-radius: var(--raio-full);
   background: transparent; color: var(--ink-2);
@@ -184,6 +221,10 @@ html[data-largura="recolhida"] .sidebar .me-nome { display: none; }
 .composer .box > .send { background: var(--action); color: var(--on-action); }
 .composer .box > .send:disabled, .composer .box > .send[aria-disabled="true"] { background: var(--hover); color: var(--ink-3); opacity: 1; }
 .composer .box > .parar-envio { background: var(--action); color: var(--on-action); }
+/* Acessos do campo (3b): com o rascunho e o bot trabalhando o Parar fica ao lado do Enviar como secundário (sem fundo); o
+   Enviar segue o único botão cheio. Sozinho, com o campo vazio, o Parar continua cheio. */
+.composer .box:not(.gravando) > .parar-envio:has(+ .send:not([hidden])) { background: transparent; color: var(--ink-2); }
+.composer .box:not(.gravando) > .parar-envio:has(+ .send:not([hidden])):is(:hover, :focus-visible) { background: var(--hover); color: var(--ink); }
 .composer .box > :is(.send, .parar-envio, .mic) svg { width: 16px; height: 16px; }
 .composer .nota:empty { display: none; }
 
@@ -243,12 +284,15 @@ html[data-largura="recolhida"] .sidebar .me-nome { display: none; }
 .detalhes .gv-cab-link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
 .detalhes .gv-cab-link .gv-chev { opacity: 0; color: var(--ink-3); }
 .detalhes .gv-cab-link:hover .gv-chev, .detalhes .gv-cab-link:focus-visible .gv-chev { opacity: 1; }
+/* Validação de 2026-11-16: o cartão das seções (Frentes, Ajustes, Rotinas) segue o do Computador (.cpm-cartao): sem
+   sombra, 4 px de respiro e a linha com raio 8 — o hover fica dentro do cartão, não na borda. Antes tinha sombra e linhas
+   de ponta a ponta, e os dois cartões do mesmo painel pareciam de famílias diferentes. */
 .detalhes .gv-cartao {
-  border: 1px solid var(--borda-sutil); border-radius: var(--raio-12); background: var(--surface-elevated); box-shadow: var(--sombra-inline); overflow: hidden;
+  padding: 4px; border: 1px solid var(--borda-sutil); border-radius: var(--raio-12); background: var(--surface-elevated); box-shadow: none; overflow: hidden;
 }
 .detalhes .gv-cartao > * + * { border-top: 0; position: relative; }
-.detalhes .gv-cartao > * + *::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--divisoria); }
-.detalhes .gv-linha { min-height: 52px; box-sizing: border-box; padding: 8px 12px; gap: 10px; border-radius: 0; }
+.detalhes .gv-cartao > * + *::before { content: ""; position: absolute; top: 0; left: 8px; right: 8px; height: 1px; background: var(--divisoria); }
+.detalhes .gv-linha { min-height: 52px; box-sizing: border-box; padding: 8px 8px 8px 12px; gap: 10px; border-radius: 8px; }
 .detalhes .gv-linha:hover { background: var(--hover); }
 .detalhes .gv-linha > .gv-ic, .detalhes .gv-linha > svg:first-child { width: 16px; height: 16px; color: var(--ink-2); flex: none; }
 .detalhes .gv-linha-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: var(--fs-corpo-2); line-height: var(--lh-corpo-2); color: var(--ink); font-weight: var(--peso-regular); }
@@ -952,3 +996,33 @@ html[data-barra-anim] #sidebar.sidebar .fixado-bt { animation: barra-rodape-entr
 @keyframes barra-rodape-entra { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { html[data-barra-anim] #sidebar.sidebar * { animation: none !important; } #sidebar.sidebar .list { transition: none !important; } }
 }
+
+/* =====================================================================================
+   O erro de uma ação (validação de 2026-11-16): aviso compacto, não faixa. Antes era uma faixa vermelha de ponta a ponta
+   com o "Detalhes" aberto embaixo — feia e invasiva. Como o aviso passageiro do app de referência e do bot-hq: um cartão
+   branco centrado logo abaixo da pílula do cabeçalho, com o ícone vermelho (o vermelho fica só no ícone, como o âmbar do
+   aviso de estado), a frase em tinta, Relatar e Detalhes discretos e o × de ícone. Some sozinho (main.ts).
+   ===================================================================================== */
+#erro:not(:empty) { display: flex; justify-content: center; }
+#erro > .erro {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; width: fit-content; max-width: min(680px, calc(100% - 32px));
+  box-sizing: border-box; margin: 10px 16px 0; padding: 7px 6px 7px 12px; border: 1px solid var(--borda-sutil); border-radius: var(--raio-12);
+  background: var(--surface-elevated); box-shadow: var(--shadow-pop); color: var(--ink); font-size: var(--fs-corpo-2); line-height: var(--lh-corpo-2);
+  animation: erro-entra var(--dur-normal) ease both;
+}
+#erro > .erro > .erro-ic { flex: none; color: var(--danger); }
+#erro > .erro > .erro-txt { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+#erro > .erro > .erro-relatar { flex: none; }
+#erro > .erro > .erro-detalhe { flex: none; margin: 0; font-size: var(--fs-rotulo); line-height: var(--lh-rotulo); color: var(--ink-3); }
+#erro > .erro > .erro-detalhe > summary { list-style: none; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+#erro > .erro > .erro-detalhe > summary::-webkit-details-marker { display: none; }
+#erro > .erro > .erro-detalhe[open] { order: 10; flex-basis: 100%; padding: 2px 0 3px 26px; }
+#erro > .erro > .erro-detalhe[open] > code { display: block; margin-top: 4px; font-size: var(--fs-legenda); color: var(--ink-2); overflow-wrap: anywhere; }
+#erro > .erro > .erro-fechar {
+  display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--raio-full);
+  background: transparent; color: var(--ink-3); cursor: pointer;
+}
+#erro > .erro > .erro-fechar:hover { background: var(--hover); color: var(--ink); }
+#erro > .erro > .erro-fechar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+@keyframes erro-entra { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { #erro > .erro { animation: none; } }

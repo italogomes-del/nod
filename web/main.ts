@@ -1,4 +1,5 @@
 import { criarFilaOffline, falhouPorRede, MOTIVO_OFFLINE } from "./lib/fila-offline.ts";
+import { cancelarNaFila, desfazerCancelamento } from "./lib/cancelar-na-fila.ts";
 import { armazemComReserva, armazemDaFila, criarJournalDeEnvio, JournalEncerrado, tipoDaFalha, type ArmazemDoJournal, type Desfecho, type ItemDoJournal, type Journal } from "./lib/journal-envio.ts";
 import { armazemDoJournalIndexedDb } from "./lib/journal-envio-idb.ts";
 import { atalhoDoTeclado as atalhoDoQuickChat, type AjustesMac } from "./telas/ajustes-mac.ts";
@@ -53,6 +54,7 @@ import type { TipoMemoria } from "../src/contracts/memoria.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { chaveDoMenuDaIa, ordemDoPasso } from "./lib/ordem.ts";
+import { abrirMenuDoMais as abrirMenuNovo } from "./telas/menu-do-mais.ts";
 import { abrirFolhaCompartilhar, abrirMenu, abrirMenuCompartilhar, abrirFolhaDeAtalhos, abrirMenuConta, abrirSobreONod, confirmarExclusaoNaFolha, menuContaAberto, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { perfilAoAbrir, perfilAoAbrirNivel, saidaDoPerfil } from "./telas/perfil-celular.ts";
 import { criarMarcaDoPerfil, planoDaSaida } from "./lib/lista-apos-saida.ts";
@@ -99,6 +101,7 @@ import { reduzirFoto } from "./lib/reduzir-foto.ts";
 import { criarLoja } from "./react/loja.ts";
 import { deveLembrar, htmlLembrete, jaFalou, marcarFalou } from "./telas/lembrete-conta.ts";
 import type { EstadoContaDto } from "../src/contracts/conta.ts";
+import { criarLeituraDeNovo } from "./lib/leitura-de-novo.ts";
 import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
 import { criarSondaDeRede } from "./lib/sonda-de-rede.ts";
 import { criarReleituraAdiada } from "./lib/releitura-adiada.ts";
@@ -112,7 +115,7 @@ import { criarPuxadorDeepLink, destinoDoAlvo, leituraConta } from "./lib/deep-li
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular } from "./lib/celular.ts";
 import { contextoDaPilula, executarNaPilula } from "./lib/setas-da-pilula.ts";
-import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, linhasDaFolha, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, teclasDoBot, type AcaoAtalho } from "./lib/atalhos.ts";
+import { alvoDoAtalho, atalhoDaNovaSala, atalhoDoNovoBot, atalhoDoTeclado, linhasDaFolha, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, teclasDoBot, type AcaoAtalho } from "./lib/atalhos.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular, SELETOR_INTERATIVO } from "./lib/gaveta-bots.ts";
 import { tentarFrotaAgora } from "./lib/tentar-frota.ts";
@@ -220,7 +223,7 @@ import { destinoDoEnvio, enviarPeloComposer, idsDaResposta, modoDoComposer, type
 import { acharBotao, aplicarFocoDaFila, botaoEmFoco, proximoDaFila, VALIDADE_DO_FOCO_MS, type FocoDaFila } from "./lib/foco-da-fila.ts";
 import { aplicarEncolhidos, decididaNaConversa, type DecididaNestaAba } from "./lib/foco-do-encolhido.ts";
 import { seletorDoFocoNaRegiao } from "./lib/foco-do-bloco.ts";
-import { itensDaRecusa } from "./lib/recusa-da-aprovacao.ts";
+import { aprovacoesAbertasDaConversa, itensDaRecusa, PLACEHOLDER_COM_APROVACAO } from "./lib/recusa-da-aprovacao.ts";
 import { atalhoEnviarTodos } from "./telas/rascunhos-de-envio.ts";
 import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
@@ -275,6 +278,7 @@ const LUGAR_TECLADO = lugarAtual();
 /** COP-12: ⌘/, "?", Suporte › Atalhos de teclado e a paleta abrem o diálogo de atalhos com as teclas deste lugar. */
 const abrirAtalhos = (): void => abrirFolhaDeAtalhos(linhasDaFolha(LUGAR_TECLADO));
 const ATALHO_NOVO_BOT = atalhoDoNovoBot(LUGAR_TECLADO);
+const ATALHO_NOVA_SALA = atalhoDaNovaSala(LUGAR_TECLADO);
 /** ADR-167: o modificador mostrado nas teclas da paleta ⌘K (o mesmo da folha de atalhos). */
 const MOD_DA_PALETA = LUGAR_TECLADO === "app-mac" ? "⌘" : LUGAR_TECLADO === "navegador-mac" ? "⌃" : "Alt";
 
@@ -427,8 +431,6 @@ document.addEventListener("toggle", (ev) => {
 let estado: Estado = estadoInicial;
 /** ADR-179 (fase 1 do React): a mesma `estado` vista pelas regiões React (useLoja). render() avisa; nenhuma região montada ainda. */
 const lojaDoEstado = criarLoja(() => estado);
-/** Janela do Desfazer ao cancelar uma mensagem da fila. */
-const CANCELAR_DESFAZER_MS = 5_000;
 let api: Api | null = null;
 
 /** ADR-166: Configurações › Aprovações. O estado é da seção (web/lib/ajustes-aprovacao.ts); a lista de bots é a da dona. */
@@ -2423,6 +2425,12 @@ async function reidratar(): Promise<void> {
   if (telaMudou || agendaNova || estado.invalidacoes.some((q) => relevante(q) && !leituras.emVoo(q))) void reidratar();
 }
 
+/** A leitura de fundo que falhou com 5xx volta à fila em 2, 5 e 10 s antes de o erro ir à tela. */
+const leituraDeNovo = criarLeituraDeNovo<Invalidacao>({
+  agendar: (fn, ms) => window.setTimeout(fn, ms),
+  reler: (q) => dispatch({ tipo: "invalidar", quais: [q] }),
+});
+
 /** Uma leitura da passada: busca, aplica, redesenha e trata o erro. Nunca rejeita (a chave em voo é compartilhada). */
 async function lerUma(q: Invalidacao, passada: { redeCaiu: boolean }, lerParaDeepLink: (lida: NonNullable<ReturnType<typeof leituraConta>>) => void): Promise<void> {
   // A rede caiu numa leitura desta passada enquanto esta esperava vaga: nem tenta (cada GET esperaria mais 8,5 s).
@@ -2441,9 +2449,12 @@ async function lerUma(q: Invalidacao, passada: { redeCaiu: boolean }, lerParaDee
     if (saiu) { render(); depoisDeSair(); }
     else if (acao?.tipo === "hidratar-nao-lidos") { render(); lerConversaDaTela(); }
     else if (acao) renderNoQuadro();
+    leituraDeNovo.deuCerto(q);
   } catch (e) {
     if (!(e instanceof ErroApi && e.status === 404)) {
       const erro = erroDe(e);
+      // A leitura de fundo que o servidor recusou com 5xx tenta de novo calada (web/lib/leitura-de-novo.ts).
+      if (erro && !ehErroDeRede(erro) && leituraDeNovo.falhou(q, erro) === "calar") return;
       if (erro && ehErroDeRede(erro)) {
         // NOD-136: falha de rede não conta para o link (leituraConta); a leitura volta com a rede.
         // Revisão NOD-215: a rede caiu. Esta leitura fica guardada para quando o nod voltar; as que ainda esperam vaga
@@ -2796,7 +2807,7 @@ function renderSidebar(estado: Estado): string {
     return `<div class="inicio-topo">
       <button class="me me-topo${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}</button>
       ${renderTituloCompacto(abaDoInicio)}
-      <span class="inicio-topo-acoes">${renderIconeTrabalhos(estado)}<button class="create-trigger" data-act="novo-bot-dialogo" aria-haspopup="dialog" aria-label="Novo bot">${MAIS}</button></span>
+      <span class="inicio-topo-acoes">${renderIconeTrabalhos(estado)}<button class="create-trigger" data-act="menu-do-mais" data-segurar="segurar-mais" aria-haspopup="menu" aria-expanded="false" aria-label="Novo (segure para criar um bot na hora)">${MAIS}</button></span>
     </div>
     ${renderIncidentes(estado)}
     ${ambiente}
@@ -2824,7 +2835,7 @@ function renderSidebar(estado: Estado): string {
   const quem = quemEsta();
   const nomeRodape = quem?.nome ?? quem?.email ?? "";
   const html = `<div class="search-wrap">
-      <div class="sh">${nodDiscreto}<button type="button" class="icone-topo barra-alternar" data-act="alternar-barra" aria-label="${barraAtual.compacta ? "Abrir a barra" : "Recolher a barra"}" aria-keyshortcuts="Meta+B" title="Barra só com avatares (⌘B)">${IC_BARRA}</button><button class="icone-topo icone-flutua" data-act="abrir-busca" aria-label="Buscar bots, conversas, ajustes e ações" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${IC_LUPA}</button>${naoLidos}<span class="create-actions"><button class="create-trigger icone-flutua" data-act="novo-bot-dialogo" data-segurar="segurar-mais" aria-haspopup="dialog" aria-label="Novo bot (segure para criar na hora)" aria-keyshortcuts="${ATALHO_NOVO_BOT.aria} Shift+Enter Shift+Space" title="Novo bot (${ATALHO_NOVO_BOT.texto}) · segure para criar na hora"><span class="segurar-anel" aria-hidden="true"></span>${IC_MAIS}</button></span></div>
+      <div class="sh">${nodDiscreto}<button type="button" class="icone-topo barra-alternar" data-act="alternar-barra" aria-label="${barraAtual.compacta ? "Abrir a barra" : "Recolher a barra"}" aria-keyshortcuts="Meta+B" title="Barra só com avatares (⌘B)">${IC_BARRA}</button><button class="icone-topo icone-flutua" data-act="abrir-busca" aria-label="Buscar bots, conversas, ajustes e ações" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${IC_LUPA}</button>${naoLidos}<span class="create-actions"><button class="create-trigger icone-flutua" data-act="menu-do-mais" data-segurar="segurar-mais" aria-haspopup="menu" aria-expanded="false" aria-label="Novo (segure para criar um bot na hora)" aria-keyshortcuts="${ATALHO_NOVO_BOT.aria} ${ATALHO_NOVA_SALA.aria} Shift+Enter Shift+Space" title="Novo (${ATALHO_NOVO_BOT.texto} bot · ${ATALHO_NOVA_SALA.texto} grupo) · segure para criar um bot na hora"><span class="segurar-anel" aria-hidden="true"></span>${IC_MAIS}</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
@@ -2890,8 +2901,33 @@ function htmlDoErro(e: ErroNaTela): string {
     return avisoDeEstado({ tom: "info", titulo: "Reconectando…", texto: e.mensagem, extra: detalhes, papel: "status", classe: "aviso-compacto aviso-reconectando" });
   }
   const nod = e.codigo === "erro_da_tela" ? (estado.frota?.agentes ?? []).find((a) => a.papel === "nod" && a.ownerId === estado.sessao?.pessoaId) : undefined;
-  const relatar = nod ? ` ${botao("abrir-conversa", "Relatar", { classe: "sm", dados: { conversa: nod.conversaId, agente: nod.id } })}` : "";
-  return `<div class="erro" role="alert">${esc(e.mensagem)}${relatar} ${botao("fechar-erro", "×", { classe: "sm" })}${detalhes}</div>`;
+  const relatar = nod ? botao("abrir-conversa", "Relatar", { classe: "sm erro-relatar", dados: { conversa: nod.conversaId, agente: nod.id } }) : "";
+  // Validação de 2026-11-16: o aviso compacto (casca.css) — ícone, a frase, Relatar, Detalhes e o × de ícone — no lugar
+  // da faixa vermelha de ponta a ponta; some sozinho em 8 s (sumirErroDaAcao).
+  return `<div class="erro" role="alert">${IC_ERRO}<span class="erro-txt">${esc(e.mensagem)}</span>${relatar}${detalhes}<button type="button" class="erro-fechar" data-act="fechar-erro" aria-label="Fechar o aviso">${IC_FECHAR_ERRO}</button></div>`;
+}
+
+const IC_ERRO = '<svg class="erro-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5"/><path d="M12 16h.01"/></svg>';
+const IC_FECHAR_ERRO = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+/**
+ * O erro de uma ação some sozinho em 8 s, como o aviso passageiro do app de referência e do bot-hq; com o ponteiro ou o
+ * foco nele (lendo, abrindo Detalhes, indo ao Relatar), espera mais 2 s e confere de novo. O "Reconectando…" não entra:
+ * ele some quando a rede volta.
+ */
+const SUMICO_DO_ERRO_MS = 8000;
+let erroComPrazo: ErroNaTela | null = null;
+function sumirErroDaAcao(): void {
+  const e = estado.erro;
+  if (e === null || ehErroDeRede(e) || e === erroComPrazo) return;
+  erroComPrazo = e;
+  const conferir = (): void => {
+    if (estado.erro !== e) return;
+    const aviso = document.querySelector("#erro .erro");
+    if (aviso?.matches(":hover, :focus-within") || aviso?.querySelector("details[open]")) { window.setTimeout(conferir, 2000); return; }
+    dispatch({ tipo: "erro", erro: null });
+  };
+  window.setTimeout(conferir, SUMICO_DO_ERRO_MS);
 }
 
 /**
@@ -3048,6 +3084,7 @@ function renderPrincipal(): void {
   const t = estado.tela;
   // NOD-174: a pessoa lê a frase do servidor; o código fechado fica só no <details>, para quem depura.
   const erro = estado.erro ? htmlDoErro(estado.erro) : "";
+  sumirErroDaAcao();
   let cabecalho = "";
   let corpo = "";
   let partes: PartesDaTimeline | null = null;
@@ -3438,9 +3475,12 @@ function atualizarComposer(): void {
   regiao("composer-pergunta", a.topo);
   // ADR-094: no celular o texto de ajuda inteiro quebrava em duas linhas dentro do campo; lá fica o curto, e o leitor de
   // tela continua ouvindo o completo.
-  const placeholder = celular.ativo() ? "Mensagem" : a.placeholder;
+  // Item 10, rodada 2: com aprovação aberta e o campo no modo comum, mandar mensagem recusa o pedido (enviarComposer).
+  const comPedido = a.placeholder === placeholderPadrao() && !alvo.salaId && aprovacoesAbertasDaConversa(estado.suaVez?.itens, alvo.conversaId).length > 0;
+  const rotulo = comPedido ? PLACEHOLDER_COM_APROVACAO : a.placeholder;
+  const placeholder = celular.ativo() && !comPedido ? "Mensagem" : rotulo;
   if (ta.placeholder !== placeholder) ta.placeholder = placeholder;
-  if (ta.getAttribute("aria-label") !== a.placeholder) ta.setAttribute("aria-label", a.placeholder);
+  if (ta.getAttribute("aria-label") !== rotulo) ta.setAttribute("aria-label", rotulo);
   // Plano "tela limpa" (2026-10-16, T5): a dica "Enter envia…" saiu. Plano "pergunta com botões" (2026-10-18): a nota do
   // modo resposta e o clipe desligado também — com pergunta aberta o campo não muda.
   if (nota && nota.textContent !== a.nota) nota.textContent = a.nota;
@@ -5003,6 +5043,9 @@ async function enviarComposer(): Promise<void> {
       else if (idEnvio && enviou) envios.esquecer(alvo.conversaId, idEnvio);
     }
     if (pendente) dispatch({ tipo: "fala-pendente-confirmada", conversaId: alvo.conversaId, idEnvio: pendente.idEnvio, mensagemId: r.ids?.mensagem ?? null, turnoId: r.ids?.turno ?? null });
+    // Item 10, rodada 2: com aprovação aberta, o servidor fechou o pedido como substituído no envio
+    // (src/use-cases/substituir-aprovacoes.ts); a fila "Sua vez" relê para o cartão sair.
+    if (r.enviado === "mensagem" && !alvo.salaId && aprovacoesAbertasDaConversa(estado.suaVez?.itens, alvo.conversaId).length > 0) dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
     else limparDepoisDeEnviar(ta, chave, texto);
     if (r.enviado === "resposta") anunciarPergunta(`Resposta enviada: ${enviado}`);
     if (r.enviado === "mensagem" && !pendente) limparAnexos(alvo.conversaId);
@@ -5100,6 +5143,96 @@ function metasDosAnexos(fila: readonly ItemAnexo[]): AnexoDaConversa[] {
 function motivoDaFalha(e: unknown): string | undefined {
   const erro = erroDe(e);
   return erro ? erroDaAcao(erro).mensagem : undefined;
+}
+
+/** A fala da pessoa ligada ao turno na fila (a linha só tem o turno; o reducer guarda a conversa e a mensagem). */
+function falaDoTurnoNaFila(turnoId: string): { conversaId: string; mensagemId: string } | null {
+  const local = estado.cancelando[turnoId];
+  if (local) return { conversaId: local.conversaId, mensagemId: local.mensagemId };
+  for (const [conversaId, c] of Object.entries(estado.conversas)) {
+    const t = c?.turnosEmCurso.find((x) => x.id === turnoId);
+    if (t?.mensagemId) return { conversaId, mensagemId: t.mensagemId };
+  }
+  return null;
+}
+
+const seletorDaLinha = (act: string, turnoId: string): string => `.fila-linha [data-act="${act}"][data-id="${CSS.escape(turnoId)}"]`;
+
+function cancelarDaFila(turnoId: string): void {
+  const fala = falaDoTurnoNaFila(turnoId);
+  const a = api;
+  if (!turnoId || !fala || !a) return;
+  const origem = document.activeElement ?? document.body;
+  avisador.acaoPropria();
+  void cancelarNaFila({
+    cancelarTurno: (id) => a.cancelarTurno(id),
+    dispatch,
+    estado: () => estado.cancelando,
+    agora: () => Date.now(),
+    agendar: (fn, ms) => void window.setTimeout(fn, ms),
+    invalidar: (conversaId) => dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}`] }),
+    mostrarErro,
+    focarDesfazer: (id) => focarQuandoAparecer(seletorDaLinha("desfazer-cancelamento", id), origem),
+    focarTentarDeNovo: (id) => focarQuandoAparecer(seletorDaLinha("cancelar-turno", id), origem),
+    focarCampoSeSaiu: (id) => window.setTimeout(() => {
+      const ativo = document.activeElement as HTMLElement | null;
+      const perdeu = !ativo || ativo === document.body || !ativo.isConnected || ativo.matches(seletorDaLinha("desfazer-cancelamento", id));
+      if (perdeu) document.getElementById("composer-texto")?.focus();
+    }, 50),
+  }, { turnoId, ...fala });
+}
+
+/**
+ * O Desfazer da fala cancelada: sem anexo, a mesma fala vai de novo pelo journal (`conversas.enviar`, chave nova) e entra
+ * no fim da fila; com anexo (que já está preso à mensagem cancelada), o texto e os arquivos voltam ao campo vazio.
+ */
+function desfazerDaFila(turnoId: string): void {
+  desfazerCancelamento({
+    dispatch,
+    estado: () => estado.cancelando,
+    fala: (conversaId, mensagemId) => {
+      const m = estado.conversas[conversaId]?.mensagens.find((x) => x.id === mensagemId);
+      if (!m) return null;
+      const respondeA = m.payload?.kind === "resposta_a_fala" ? m.payload.respondeA.mensagemId : undefined;
+      return { texto: m.texto, anexos: (m.anexos ?? []).filter((x) => x.origem !== "bot"), ...(respondeA ? { respondeA } : {}) };
+    },
+    reenviar: reenviarDaFila,
+    campoVazio: (conversaId) => {
+      const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+      return conversaAtual()?.conversaId === conversaId && !!ta && ta.value.trim() === "" && (anexosPendentes.get(conversaId) ?? []).length === 0;
+    },
+    devolverAoCampo: (conversaId, texto, anexos) => {
+      const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+      if (ta) { escreverNoCampo(ta, texto); ajustarAltura(ta); atualizarBarra(ta); }
+      if (composerDe) rascunhos.guardar(composerDe, texto);
+      const tenant = estado.sessao?.tenantId;
+      if (!tenant || anexos.length === 0) return;
+      // Os bytes voltam da rota do anexo e sobem de novo como anexo novo (o de antes ficou preso à fala cancelada).
+      void Promise.all(anexos.map(async (x) => {
+        const r = await fetch(`/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(x.id)}`, { credentials: "same-origin" });
+        if (!r.ok) throw new Error(`anexo ${r.status}`);
+        return new File([await r.blob()], x.nome, { type: x.mime });
+      })).then((arquivos) => { if (conversaAtual()?.conversaId === conversaId) adicionarArquivos(arquivos); }, mostrarErro);
+    },
+    focarCampo: () => document.getElementById("composer-texto")?.focus(),
+  }, turnoId);
+}
+
+/** O reenvio do Desfazer: o mesmo caminho da mensagem comum do campo (fala pendente + journal), sem passar pelo campo. */
+function reenviarDaFila(conversaId: string, texto: string, respondeA?: string): boolean {
+  const j = journal;
+  if (!api || !j) return false;
+  const idEnvio = envios.iniciar(conversaId, texto, [], respondeA);
+  if (!idEnvio) return false;
+  const em = Date.now();
+  dispatch({ tipo: "fala-pendente", conversaId, pendente: { idEnvio, texto, anexos: [], ...(respondeA ? { respondeA } : {}), em, estado: "enviando", mensagemId: null, turnoId: null } });
+  rolagem.colar();
+  const item: ItemDoJournal = { conversaId, idEnvio, texto, anexos: [], ...(respondeA ? { respondeA } : {}), em };
+  void j.enviar(item).then(
+    (resposta) => { envios.concluir(conversaId, true); terminarDoJournal(j, item, { ok: true, resposta }); },
+    (erro) => { envios.concluir(conversaId, false); terminarDoJournal(j, item, { ok: false, erro, tipo: tipoDaFalha(erro) }); },
+  );
+  return true;
 }
 
 /**
@@ -6664,26 +6797,16 @@ function abrirDialogoCriarBot(nome = ""): void {
   void abrirCriarBot(depsDialogoCriarBot(), { nome });
 }
 
-/** O menu do botão direito do +: "Novo bot" (⌘N) e "Novo chat em grupo", na casca de menu de sempre. */
+/** O menu "Novo" do + (clique, teclado e clique direito; no celular, folha de baixo): Novo bot e Novo chat em grupo. */
 function abrirMenuDoMais(ancora: HTMLElement, ponto?: { x: number; y: number }): void {
-  const item = (acao: string, icone: string, texto: string, meta = "") => `<button type="button" role="menuitem" data-mais="${acao}">${icone}<span>${texto}</span>${meta ? `<span class="mc-meta" aria-hidden="true">${esc(meta)}</span>` : ""}</button>`;
-  const d = dialogo(`<div role="menu" aria-label="Novo">${item("novo-bot", IC_MAIS, "Novo bot", ATALHO_NOVO_BOT.texto)}${item("nova-sala", IC_PESSOAS_MENU, "Novo chat em grupo")}</div>`, true);
-  d.classList.add("menu-mais");
-  const r = ancora.getBoundingClientRect();
-  const x = ponto ? ponto.x + 4 : r.left;
-  const y = ponto ? ponto.y + 4 : r.bottom + 6;
-  d.style.left = `${Math.max(12, Math.min(x, window.innerWidth - d.offsetWidth - 12))}px`;
-  d.style.top = `${Math.max(12, Math.min(y, window.innerHeight - d.offsetHeight - 12))}px`;
-  d.addEventListener("click", (e) => {
-    const qual = (e.target as HTMLElement).closest<HTMLElement>("[data-mais]")?.dataset.mais;
-    if (!qual) return;
-    d.close();
-    if (qual === "novo-bot") abrirDialogoCriarBot();
-    else navegar({ tipo: "nova-sala" });
+  abrirMenuNovo(ancora, {
+    atalhoBot: ATALHO_NOVO_BOT.texto,
+    atalhoGrupo: ATALHO_NOVA_SALA.texto,
+    folha: celular.ativo(),
+    ponto,
+    escolher: (qual) => (qual === "novo-bot" ? abrirDialogoCriarBot() : navegar({ tipo: "nova-sala" })),
   });
-  d.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
 }
-const IC_PESSOAS_MENU = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="5.5" r="2.2"/><path d="M2 13c.5-2 2-3 4-3s3.5 1 4 3"/><circle cx="11.5" cy="6" r="1.8"/><path d="M11 10c1.6 0 2.7.9 3 2.5"/></svg>';
 
 /** ADR-174: o que o onboarding pede ao app (o preparo com %, web/telas/criar-bot.ts). */
 function depsCriarBot(): DepsCriarBot {
@@ -7254,8 +7377,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // NOD-383: no celular, segurar o + pergunta antes ("Criar um bot agora?"); só Criar chama o criarAgente.
   // Spec do botão + (tela 1): "Criar o bot “…”" (Nova conversa) abre o diálogo "Criar novo bot" com o nome digitado.
   "criar-rapido": () => abrirDialogoCriarBot((document.getElementById("busca-destinatario") as HTMLInputElement | null)?.value.trim() ?? ""),
-  // Spec do botão + (tela 1): o clique no + (e ⌘N) abre o diálogo. Segurar 500 ms continua criando na hora (segurar-mais).
+  // Spec do botão + (tela 1): ⌘N (e a paleta) abrem o diálogo. Segurar o + 500 ms continua criando na hora (segurar-mais).
   "novo-bot-dialogo": () => abrirDialogoCriarBot(),
+  // O clique (ou Enter/Espaço) no + abre o menu "Novo": Novo bot e Novo chat em grupo. Só abre o menu, sem efeito.
+  "menu-do-mais": (el) => abrirMenuDoMais(el),
   // NOD-383: segurar o + do topo. No celular o toque longo sai sem querer: pergunta antes; no desktop cria direto.
   "segurar-mais": () => void criarRapido(celular.ativo(), () => confirmarCriarBot(LOGO_NOD), criarBotAgora),
   "escolher-missao": (el) => responderBoasVindas(el.dataset.texto ?? ""),
@@ -7885,26 +8010,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },
   revogar: (el) => agir(async () => void (await api!.revogar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
   // definido em 2026-09-24 (ADR-045): "Entendi" no aviso de queda do Mac.
-  // definido em 2026-09-24: Cancelar de UMA mensagem da fila. Fica 5 s em "Cancelando… Desfazer" só na
-  // web; depois disso vai ao servidor. Desfazer antes do prazo não toca o servidor (nada a reenfileirar).
-  "cancelar-turno": (el) => {
-    const turnoId = el.dataset.id ?? "";
-    if (!turnoId) return;
-    dispatch({ tipo: "cancelando-turno", turnoId, agora: Date.now() });
-    window.setTimeout(() => {
-      if (!(turnoId in estado.cancelando)) return;
-      void agir(async () => {
-        try {
-          await api!.cancelarTurno(turnoId);
-        } finally {
-          dispatch({ tipo: "desfazer-cancelamento", turnoId });
-          const alvo = conversaAtual();
-          if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
-        }
-      });
-    }, CANCELAR_DESFAZER_MS);
-  },
-  "desfazer-cancelamento": (el) => dispatch({ tipo: "desfazer-cancelamento", turnoId: el.dataset.id ?? "" }),
+  // Cancelar só a mensagem na fila (revisto em 2026-11-16, web/lib/cancelar-na-fila.ts): o POST sai na hora do clique
+  // (a absorção acontece no próximo passo do bot, e os 5 s locais de antes perdiam a corrida); o Desfazer vem depois do OK.
+  "cancelar-turno": (el) => cancelarDaFila(el.dataset.id ?? ""),
+  "desfazer-cancelamento": (el) => desfazerDaFila(el.dataset.id ?? ""),
   // Parte 1 do plano "o pensamento no chat": a fala pendente que falhou.
   "reenviar-pendente": (el) => reenviarPendente(el.dataset.conversa ?? "", el.dataset.id ?? ""),
   "descartar-pendente": (el) => {

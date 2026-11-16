@@ -132,6 +132,14 @@
   .bot-menu.menu-conta.folha::before { content: ""; display: block; width: 36px; height: 4px; margin: 0 auto 10px; border-radius: 2px; background: var(--line-strong); }
   .bot-menu.menu-conta.folha::backdrop { background: var(--backdrop); }
   .bot-menu.menu-conta.folha button { min-height: 52px; font-size: 16px; }
+  /* O menu "Novo" do + também vira folha de baixo: título "Novo" e dois itens de 44 px (Novo bot, Novo chat em grupo). */
+  .bot-menu.menu-mais.folha { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: 100%; max-width: none;
+    box-sizing: border-box; padding: 8px 8px calc(12px + env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; border-bottom: 0;
+    animation: inicio-folha .24s cubic-bezier(.2, .8, .2, 1); }
+  .bot-menu.menu-mais.folha::before { content: ""; display: block; width: 36px; height: 4px; margin: 0 auto 10px; border-radius: 2px; background: var(--line-strong); }
+  .bot-menu.menu-mais.folha::backdrop { background: var(--backdrop); }
+  .bot-menu.menu-mais.folha .menu-nome { margin: 4px 16px 8px; }
+  .bot-menu.menu-mais.folha button[role="menuitem"] { min-height: 48px; gap: 16px; padding: 0 16px; font-size: 16px; }
 
   /* Carregando, erro e vazio (protótipo v3). */
   .inicio-aviso { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0; padding: 4px 20px; font-size: 14px; color: var(--ink-2); }
@@ -444,6 +452,10 @@
   .linha-espera .linha-centro { max-width: 100%; }
   /* Protótipo NOD-92: a linha da fila ("Acordando …", "Rodar em X desta vez", Cancelar) quebra em vez de vazar em 390 px. */
   .fila-chip { flex-wrap: wrap; row-gap: 2px; text-align: right; }
+  /* Acessos · fila: a linha quebra à direita, o texto fica em 12 px e o Cancelar/Desfazer ganha alvo de 44 px pelo ::after. */
+  .timeline .fila-linha { overflow-wrap: anywhere; }
+  .timeline .fila-linha .bt.link { position: relative; }
+  .timeline .fila-linha .bt.link::after { content: ""; position: absolute; inset: -14px -8px; }
   .nv-sono, .nv-conectar { padding-left: 18px; }
 }
 
@@ -845,3 +857,12 @@
 }
 
 @keyframes nl-sobe-c { from { opacity: 0; transform: translateY(8px); } }
+
+/* Acessos · computador, item 5 (definido em 2026-11-16): no celular o topo da tela cheia diz só "{Bot} · precisa de você"
+   e o pedido inteiro desce para baixo da pílula, centrado em 14 px; o Sair ganha 44 px de alvo. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .ctc-tit-longo, .ctc-tit-pedido { display: none; }
+  .ctc-tit-curto { display: inline; }
+  .ctc-pedido:not(:empty) { display: block; max-width: 100%; margin: 0; font-size: 14px; line-height: 20px; text-align: center; color: #ffffffa8; } /* cor-fixa: sobre o fundo fixo da tela cheia */
+  .ctc-sair { width: 44px; height: 44px; margin-right: -10px; }
+}

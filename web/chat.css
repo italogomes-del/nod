@@ -27,9 +27,21 @@
 .composer .box:has(textarea:placeholder-shown) > .send, .composer .box > .send:disabled { background: var(--chat-preenchido); color: var(--chat-icone); }
 .composer .box > .parar-envio { background: var(--chat-parar-fundo); color: var(--chat-parar-quadrado); border: 0; }
 .composer .box > .parar-envio svg { width: 14px; height: 14px; }
+/* Acessos do campo (3b): o Parar ao lado do Enviar (rascunho com o bot trabalhando) é secundário — sem fundo, preenchido
+   só no hover e no foco; o Enviar continua o único botão cheio. Gravando, o celular tem o Parar âmbar (mobile.css). */
+.composer .box:not(.gravando) > .parar-envio:has(+ .send:not([hidden])) { background: transparent; color: var(--chat-tinta-2); }
+.composer .box:not(.gravando) > .parar-envio:has(+ .send:not([hidden])):is(:hover, :focus-visible) { background: var(--chat-preenchido); color: var(--chat-tinta); }
 
-/* A exceção do nod: a mensagem que só vai ser lida quando a máquina ligar. Linha como o separador, à direita, sem botão. */
-.timeline .fila-linha { margin-top: 4px; font-size: 12px; line-height: 16px; font-weight: 425; color: var(--chat-tinta-3); text-align: right; }
+/* Acessos · fila (2026-11-16): a linha pequena embaixo da fala na fila, à direita: "Na fila · Cancelar", "Cancelando…",
+   "Cancelada · não rodou · Desfazer"… O botão é texto (tinta-2, peso 500, sem vermelho), no tamanho da linha; o padding
+   à direita deixa o anel de foco inteiro na borda da coluna. O balão na fila NÃO apaga (o branco sobre a cor do bot já
+   está perto de 4,5:1, NOD-431): o "em voo" é só o `aria-busy` e esta linha. */
+.timeline .fila-linha { margin-top: 4px; padding-right: 3px; font-size: 12px; line-height: 16px; font-weight: 425; color: var(--chat-tinta-3); text-align: right; }
+.timeline .fila-linha .bt.link { display: inline; min-height: 0; padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--chat-tinta-2); vertical-align: baseline; }
+.timeline .fila-linha .bt.link:hover { color: var(--chat-tinta); text-decoration: underline; }
+.timeline .fila-linha .bt.link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 3px; }
+/* A cancelada veste o balão "não enviada": superfície, contorno tracejado line-strong e tinta-2 (não parece fala que vai rodar). */
+.timeline .message.you.fila-cancelada .bubble { --balao-fundo: var(--surface); --balao-tinta: var(--ink); --balao-codigo: var(--surface-raised); background: var(--surface); border: 1px dashed var(--line-strong); color: var(--ink-2); text-decoration: none; box-shadow: none; }
 
 /* As ações no hover: 24 × 24, sem fundo, ícone de 16, sem animação; à direita do balão do bot, à esquerda do da pessoa. */
 .timeline .message .bubble-wrap { position: relative; }
@@ -42,6 +54,14 @@
 .timeline .message .msg-actions [data-act="relatar-mensagem"] { display: none; }
 .timeline .message.you .msg-actions [data-act="reagir-fala"] { display: none; }
 .timeline .message .msg-actions:has(button[aria-expanded="true"]) { transform: translateY(-50%); }
+/* Validação de 2026-11-16: no recibo de um pedido (a linha sem balão: "Permitido uma vez · …") as ações aparecem logo
+   depois do texto, 4 px depois do fim, como na fala do bot — antes ficavam na outra ponta da coluna, longe do que agem.
+   A linha passa a ter a largura do recibo; os botões são os mesmos da fala (24, sem borda). */
+.timeline .msg-linha.msg-encolhido { width: fit-content; max-width: 100%; }
+.timeline .msg-linha.msg-encolhido .msg-actions { left: calc(100% + 4px); right: auto; gap: 0; }
+.timeline .msg-linha .msg-actions button.bt { width: 24px; height: 24px; padding: 0; border: 0; background: none; color: var(--chat-icone); }
+.timeline .msg-linha .msg-actions button.bt:hover { background: none; border: 0; color: var(--chat-tinta); }
+.timeline .msg-linha .msg-actions button.bt svg { width: 16px; height: 16px; }
 
 /* ---- 2. O indicador: a linha depois do último balão (48 = 36 + 6/6), personagem 28 e o rótulo 14/22 ------------- */
 .timeline .message.fala-viva.indicador { display: flex; align-items: center; gap: 8.5px; min-height: 36px; padding: 6px 0 6px 8px; margin: 16px 0 0; transform-origin: left center; animation: indicador-entra 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
