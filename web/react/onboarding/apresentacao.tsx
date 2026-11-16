@@ -45,14 +45,14 @@ function Seletores({ forma, cor, executar }: { forma: FormaAgente; cor: CorAgent
     <>
       <div className="cb-formas" role="radiogroup" aria-label="Forma">
         {comAtual(FORMAS_DO_SELETOR, FORMAS_MASCOTE, forma).map((f) => (
-          <button key={f} type="button" className="cb-forma" role="radio" aria-checked={f === forma} tabIndex={f === forma ? 0 : -1} aria-label={NOME_DA_FORMA[f]} title={NOME_DA_FORMA[f]} onClick={() => executar("apres-forma", { forma: f })}>
+          <button key={f} type="button" className="cb-forma" role="radio" data-act="apres-forma" data-forma={f} aria-checked={f === forma} tabIndex={f === forma ? 0 : -1} aria-label={NOME_DA_FORMA[f]} title={NOME_DA_FORMA[f]} onClick={() => executar("apres-forma", { forma: f })}>
             <Mascote bot={{ nome: NOME_DA_FORMA[f], cor, forma: f }} tamanho="sm" />
           </button>
         ))}
       </div>
       <div className="cb-cores" role="radiogroup" aria-label="Cor">
         {comAtual(CORES_DO_SELETOR, CORES_MASCOTE, cor).filter((c) => c !== "c-black").map((c) => (
-          <button key={c} type="button" className="cb-cor" role="radio" aria-checked={c === cor} tabIndex={c === cor ? 0 : -1} aria-label={NOME_DA_COR[c]} title={NOME_DA_COR[c]} onClick={() => executar("apres-cor", { cor: c })}>
+          <button key={c} type="button" className="cb-cor" role="radio" data-act="apres-cor" data-cor={c} aria-checked={c === cor} tabIndex={c === cor ? 0 : -1} aria-label={NOME_DA_COR[c]} title={NOME_DA_COR[c]} onClick={() => executar("apres-cor", { cor: c })}>
             <span className={`cor-amostra ${c}`} />
           </button>
         ))}
@@ -93,7 +93,7 @@ export function Preparo({ p, bot, executar }: { p: EstadoPreparo; bot: { nome: s
 }
 
 function Fichas({ lista, atual, campo, executar }: { lista: readonly string[]; atual: string | null; campo: "funcao" | "origem"; executar: Executar }) {
-  return <div className="ap-fichas" role="radiogroup">{lista.map((v) => <button key={v} type="button" className="ap-ficha" role="radio" aria-checked={v === atual} onClick={() => executar("apres-escolher", { campo, valor: v })}>{v}</button>)}</div>;
+  return <div className="ap-fichas" role="radiogroup">{lista.map((v) => <button key={v} type="button" className="ap-ficha" role="radio" data-act="apres-escolher" data-campo={campo} data-valor={v} aria-checked={v === atual} onClick={() => executar("apres-escolher", { campo, valor: v })}>{v}</button>)}</div>;
 }
 
 /** A cena do passo 3: uma janela do computador do bot com um cursor que anda e clica. */
@@ -134,7 +134,7 @@ function Apps({ e, emailGoogle, executar }: { e: EstadoApresentacao; emailGoogle
             <Svg html={ICONE_APP[a.slug]} />
             <span className="ap-app-nome">{a.nome}</span>
             {emailGoogle && i < 2 && !feito ? <span className="ap-sugerido">Sugerido</span> : null}
-            {feito ? <span className="ap-conectado">Conectado</span> : <button type="button" className={`bt${i === 0 ? " pri" : ""}`} aria-busy={conectando || undefined} disabled={conectando} onClick={() => executar("apres-conectar", { slug: a.slug })}>{conectando ? "Conectando…" : "Conectar"}</button>}
+            {feito ? <span className="ap-conectado">Conectado</span> : <button type="button" className={`bt${i === 0 ? " pri" : ""}`} data-act="apres-conectar" data-slug={a.slug} aria-busy={conectando || undefined} disabled={conectando} onClick={() => executar("apres-conectar", { slug: a.slug })}>{conectando ? "Conectando…" : "Conectar"}</button>}
           </li>
         );
       })}
@@ -158,7 +158,7 @@ function Criar({ e, executar }: { e: EstadoApresentacao; executar: Executar }) {
       <Seletores forma={e.forma} cor={e.cor} executar={executar} />
       <div className="ap-composer">
         <textarea data-campo-apres="primeira" rows={1} maxLength={2000} placeholder={pergunta} aria-label={pergunta} value={primeira} onKeyDown={enter} onChange={(ev) => { setPrimeira(ev.target.value); executar("apres-digitar", { campo: "primeira", valor: ev.target.value }); }} />
-        <button type="button" className="ap-enviar" aria-label="Criar e mandar" disabled={!nomeDoBot({ nome })} onClick={criar} dangerouslySetInnerHTML={{ __html: SETA }} />
+        <button type="button" className="ap-enviar" data-act="apres-criar" aria-label="Criar e mandar" disabled={!nomeDoBot({ nome })} onClick={criar} dangerouslySetInnerHTML={{ __html: SETA }} />
       </div>
     </>
   );
@@ -187,8 +187,8 @@ export function Apresentacao({ e, emailGoogle, ligacao, executar }: { e: EstadoA
     if (primeiro.current) { primeiro.current = false; return; }
     raiz.current?.querySelector<HTMLElement>("#ap-titulo, .cb-preparo-titulo")?.focus();
   }, [p]);
-  const seguir = (rotulo = "Continuar", desligado = false) => <button type="button" className="bt pri ap-seguir" disabled={desligado} onClick={() => executar("apres-seguir")}>{rotulo}</button>;
-  const pular = (rotulo = "Pular") => <button type="button" className="bt link ap-pular" onClick={() => executar("apres-pular")}>{rotulo}</button>;
+  const seguir = (rotulo = "Continuar", desligado = false) => <button type="button" className="bt pri ap-seguir" data-act="apres-seguir" disabled={desligado} onClick={() => executar("apres-seguir")}>{rotulo}</button>;
+  const pular = (rotulo = "Pular") => <button type="button" className="bt link ap-pular" data-act="apres-pular" onClick={() => executar("apres-pular")}>{rotulo}</button>;
   const podeSeguir = !(p === "funcao" && !e.funcao) && !(p === "origem" && !e.origem) && p !== "criar";
   // ← → andam pelos passos fora dos campos e dos rádios (como no protótipo).
   const teclas = (ev: KeyboardEvent<HTMLElement>): void => {
@@ -203,7 +203,7 @@ export function Apresentacao({ e, emailGoogle, ligacao, executar }: { e: EstadoA
         <section ref={raiz} className="ap ap-boas-vindas" aria-labelledby="ap-titulo" onKeyDown={teclas}>
           <div className="ap-marca"><Mascote bot={NOD} tamanho="lg" /><h1 id="ap-titulo" tabIndex={-1}>nod</h1></div>
           <p className="ap-sub">Sua equipe de bots, sempre ligada, para quem você dá trabalho de verdade.</p>
-          <button type="button" className="bt pri ap-entrar" onClick={() => executar("apres-seguir")}>Entrar <Svg html={SETA} /></button>
+          <button type="button" className="bt pri ap-entrar" data-act="apres-seguir" onClick={() => executar("apres-seguir")}>Entrar <Svg html={SETA} /></button>
           {ligacao ? <button type="button" className="bt link ap-voz" onClick={() => executar("apres-ligacao")}>Prefiro conversar por voz</button> : null}
           <p className="ap-termos">Ao usar o nod, você concorda com os Termos.</p>
         </section>
@@ -252,7 +252,7 @@ export function Apresentacao({ e, emailGoogle, ligacao, executar }: { e: EstadoA
   return (
     <div className="ap-camada">
       <section ref={raiz} className={`ap ap-${p}`} aria-labelledby="ap-titulo" onKeyDown={teclas}>
-        {e.passo > 0 && p !== "preparando" ? <button type="button" className="ap-voltar" aria-label="Voltar" onClick={() => executar("apres-voltar")}>‹</button> : null}
+        {e.passo > 0 && p !== "preparando" ? <button type="button" className="ap-voltar" data-act="apres-voltar" aria-label="Voltar" onClick={() => executar("apres-voltar")}>‹</button> : null}
         <div className="ap-palco" data-passo={p}>{corpo}</div>
         <Rodape passo={e.passo}>{acoes}</Rodape>
       </section>
