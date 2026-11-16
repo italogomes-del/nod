@@ -1,6 +1,6 @@
 import type { CorAgente, FormaAgente } from "../../src/contracts/agente.ts";
 export { COR_PADRAO, FORMA_PADRAO, NOME_MAX } from "../lib/aparencia-do-bot.ts";
-import { NOME_MAX } from "../lib/aparencia-do-bot.ts";
+import { COR_PADRAO, FORMA_PADRAO, NOME_MAX } from "../lib/aparencia-do-bot.ts";
 import { esc, iconeAgente } from "../lib/render.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE, NOME_DA_COR, NOME_DA_FORMA, type EstadoMascote } from "../lib/mascote.ts";
 import { ErroDoPreparo, novoPreparo, rodarPreparo, subtituloDoPreparo, tique, type EstadoPreparo, type EtapasDoPreparo } from "../lib/preparo.ts";
