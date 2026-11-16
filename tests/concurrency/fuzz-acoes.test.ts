@@ -144,7 +144,11 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       home = mkdtempSync(join(tmpdir(), "nod-fuzz-home-"));
       desbloquear = bloquearRedeExterna({ unixPermitidos: [home] });
       // tela.capturar entra no fuzz com a flag ligada e um capturador falso: mede a validação da rota sem subir Chrome.
-      srv = await servidorCompleto({ env: { ...config.env, NOD_HOME: home }, capturador: { capturar: async () => ASSINATURA_PNG }, intervalos: { orquestradorMs: 3_600_000, schedulerMs: 3_600_000, expiracaoMs: 3_600_000, outboxMs: 3_600_000, leaseMs: 3_600_000 } });
+      // O fuzz atribui qualquer escrita entre os retratos ao pedido em curso. O laço do disjuntor re-sonda apps com falha
+      // e escreve em `conectores` fora desse pedido; no noturno de 16/11 (semente 2009613902), a volta de 60 s caiu entre
+      // um 404 de apps.habilitar e seu retrato e acusou a rota errada. As confirmações disparadas pelas próprias chamadas
+      // continuam ativas; só os ticks independentes ficam fora da janela do teste, como os demais laços abaixo.
+      srv = await servidorCompleto({ env: { ...config.env, NOD_HOME: home }, capturador: { capturar: async () => ASSINATURA_PNG }, intervalos: { orquestradorMs: 3_600_000, schedulerMs: 3_600_000, expiracaoMs: 3_600_000, outboxMs: 3_600_000, leaseMs: 3_600_000, disjuntorMs: 3_600_000 } });
       sessao = srv.pessoa;
       outraEscopo.tenantId = srv.pessoa.tenantId;
       await srv.dbDono`insert into pessoas (tenant_id, id, nome, iniciais) values (${outraEscopo.tenantId}, ${outraEscopo.pessoaId}, 'Outra do fuzz', 'OF') on conflict do nothing`;
