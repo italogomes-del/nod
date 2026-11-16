@@ -192,6 +192,8 @@
   .presenca { display: none; }
   .cab-acoes { flex: none; flex-wrap: nowrap; gap: 4px; margin-left: 0; }
   .cab-acoes .bt { min-width: 44px; min-height: 44px; padding: 8px 10px; }
+  .tela-nova-sala .opcao { min-height: 44px; padding: 6px 0; box-sizing: border-box; }
+  .tela-nova-sala [data-act="criar-sala"] { min-height: 44px; }
   /* NOD-381 (protótipo nod-381, aprovado em 2026-10-27): o topo da conversa flutua sobre o chat — o ‹ num círculo de vidro
      à esquerda e a pílula do bot centrada (44 px, avatar 28, nome 15/600 e a presença em 12 px embaixo, sem ponto nem ›).
      Embaixo deles o texto esmaece (--surface sólido até o meio dos botões → transparente em sa+76). Só os botões recebem
