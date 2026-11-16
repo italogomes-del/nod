@@ -10167,7 +10167,11 @@ function passoDaRolagem(): void {
   if (passo === 0) return;
   const antes = lista.scrollTop;
   lista.scrollTop = antes + passo;
-  if (lista.scrollTop !== antes) quadroDaRolagem = requestAnimationFrame(passoDaRolagem);
+  if (lista.scrollTop === antes) return;
+  // A lista andou sob o ponteiro parado: o realce acompanha o que ficou embaixo dele.
+  const grupo = document.elementFromPoint(x, y)?.closest<HTMLElement>("#sidebar [data-grupo]");
+  if (grupo) marcarAlvo(grupo, x, y);
+  quadroDaRolagem = requestAnimationFrame(passoDaRolagem);
 }
 
 /** Grade: a vaga é medida entre os OUTROS fixados (a vaga não entra na conta, então não oscila). Seção: a seção inteira. */
@@ -10204,10 +10208,33 @@ function soltarBot(id: string, destino: Destino, indice: number): void {
   const ordem = destino.grupo === "secao" ? ordemAoSoltarNaSecao(frota.agentes, pessoaId, id, destino.secao) : ordemAoSoltar(frota.agentes, pessoaId, id, destino, indice);
   if (!ordem) return;
   dispatch({ tipo: "hidratar-frota", frota: { ...frota, agentes: frotaAoSoltar(frota.agentes, id, destino, ordem) } });
-  void agir(async () => {
-    await mudarGestao(() => api!.organizarAgente(id, destino.grupo === "fixados" ? { fixado: true, ordem } : { fixado: false, secao: destino.secao, ordem }));
-  });
+  // Sem o `ocupado` do agir(): a barra já mudou na hora, e o cursor de espera anunciaria uma espera que não existe.
+  avisador.acaoPropria();
+  dispatch({ tipo: "erro", erro: null });
+  void mudarGestao(() => api!.organizarAgente(id, destino.grupo === "fixados" ? { fixado: true, ordem } : { fixado: false, secao: destino.secao, ordem })).catch(mostrarErro);
 }
+
+/**
+ * O :hover depois de soltar (HTML5): o navegador só o refaz quando o ponteiro anda, e até lá ele fica na linha que
+ * ocupou o lugar de onde o bot saiu. Até o primeiro movimento, o hover velho sai (`data-sem-hover`) e a linha sob o
+ * ponteiro acende (`.hover-no-ponto`).
+ */
+function hoverDepoisDeSoltar(x: number | null, y: number | null): void {
+  const barra = document.getElementById("sidebar");
+  if (!barra) return;
+  barra.setAttribute("data-sem-hover", "");
+  if (x === null || y === null) return;
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    if (!barra.hasAttribute("data-sem-hover")) return;
+    document.elementFromPoint(x, y)?.closest<HTMLElement>("#sidebar .bot-row, #sidebar .fixado")?.classList.add("hover-no-ponto");
+  }));
+}
+document.addEventListener("pointermove", () => {
+  const barra = document.getElementById("sidebar");
+  if (!barra?.hasAttribute("data-sem-hover")) return;
+  barra.removeAttribute("data-sem-hover");
+  for (const n of barra.querySelectorAll(".hover-no-ponto")) n.classList.remove("hover-no-ponto");
+});
 
 document.addEventListener("dragstart", (ev) => {
   const el = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar [data-arrastavel]");
@@ -10227,9 +10254,7 @@ document.addEventListener("dragstart", (ev) => {
     document.getElementById("sidebar")?.classList.add("arrastando-bot");
   });
 });
-// O `drag` chega na origem a cada movimento; o `dragover`, no que está sob o ponteiro. Os dois movem o cartão (o `drag`
-// do fim vem com 0,0 e é ignorado).
-document.addEventListener("drag", (ev) => { if (arrastandoBot && (ev.clientX || ev.clientY)) moverFantasma(ev.clientX, ev.clientY); });
+// O cartão e o realce andam pelo mesmo `dragover` (o navegador o repete com o ponteiro parado), então não se desencontram.
 document.addEventListener("dragover", (ev) => {
   if (!arrastandoBot) return;
   moverFantasma(ev.clientX, ev.clientY);
@@ -10246,6 +10271,9 @@ document.addEventListener("dragover", (ev) => {
 document.addEventListener("drop", (ev) => {
   if (!arrastandoBot) return;
   ev.preventDefault();
+  // O alvo é o que está sob o ponteiro na hora de soltar (a lista pode ter rolado sem outro dragover).
+  const sob = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar [data-grupo]");
+  if (sob) marcarAlvo(sob, ev.clientX, ev.clientY);
   const id = arrastandoBot;
   const alvo = alvoArrasto;
   const nome = nomeArrastado;
@@ -10253,11 +10281,13 @@ document.addEventListener("drop", (ev) => {
   encerrarArrasto();
   anunciarGestao(frasesDoArrasto.soltou(nome, onde));
   if (alvo) soltarBot(id, alvo.destino, alvo.indice);
+  hoverDepoisDeSoltar(ev.clientX, ev.clientY);
 });
 document.addEventListener("dragend", () => {
   if (!arrastandoBot) return;
   anunciarGestao(frasesDoArrasto.cancelou(nomeArrastado));
   encerrarArrasto();
+  hoverDepoisDeSoltar(null, null);
 });
 
 // ---- Máquinas (ADR-090): conectar uma VM por código e escolher onde cada bot trabalha --------------------------------------

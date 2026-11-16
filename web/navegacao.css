@@ -15,6 +15,10 @@
    não aparece. Revisto em 2026-11-16. */
 #sidebar [draggable="true"] { -webkit-user-drag: element; }
 #sidebar .origem-arrasto { opacity: .5; }
+/* O navegador congela o :hover onde se pegou o bot e, depois de soltar, até o ponteiro andar (hoverDepoisDeSoltar): nos
+   dois casos o hover velho sai; ao soltar, a linha sob o ponteiro acende. O selecionado fica. */
+#sidebar:is(.arrastando-bot, [data-sem-hover]) :is(.bot-row:not(.hover-no-ponto):not(:has(> .row[aria-current="true"])), .fixado-bt:not([aria-current="true"]), .novo-time):hover { background: none; }
+#sidebar .bot-row.hover-no-ponto, #sidebar .fixado.hover-no-ponto > .fixado-bt:not([aria-current="true"]) { background: var(--hover); }
 .fixados[data-vazio], .section[data-vazio] { display: none; }
 .arrastando-bot .fixados[data-vazio] { display: grid; }
 .fixados-vazio { grid-column: 1 / -1; margin: 0; padding: 18px 12px; border: 1.5px dashed var(--line-strong); border-radius: var(--raio-14); text-align: center;
