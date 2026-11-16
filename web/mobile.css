@@ -857,3 +857,10 @@
 }
 
 @keyframes nl-sobe-c { from { opacity: 0; transform: translateY(8px); } }
+
+/* QA 2026-11-16: filtros e ações do Marketplace tinham só 27–36 px no toque. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .mkt-filtros .bt, .mkt-atencao .cp-acao, .app-card-actions .bt, .app-card-actions a {
+    display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; box-sizing: border-box;
+  }
+}
