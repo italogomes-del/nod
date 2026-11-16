@@ -36,7 +36,10 @@ export function sempreNoCartao(item: Pick<Item, "itensAprovacao" | "nuncaPermane
   return item.itensAprovacao.filter((i) => i.sempreServe === true && i.motivoManual === "revisor_pediu" && !i.origemSensivel && i.destino.conector !== "terminal" && i.destino.conector !== "computador" && !nunca.has(i.id));
 }
 
-const cortar = (t: string): string => (t.length > MOTIVO_NA_TELA_MAX ? `${t.slice(0, MOTIVO_NA_TELA_MAX - 1).trimEnd()}…` : t);
+const cortar = (t: string): string => {
+  const caracteres = Array.from(t);
+  return caracteres.length > MOTIVO_NA_TELA_MAX ? `${caracteres.slice(0, MOTIVO_NA_TELA_MAX - 1).join("").trimEnd()}…` : t;
+};
 
 /**
  * A linha embaixo da pergunta. "Revisor:" vai em texto, não só no escudo. No `revisor_pediu`, o motivo do revisor (texto
