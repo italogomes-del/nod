@@ -526,7 +526,7 @@ export function criarSupervisor(op) {
     });
   }
 
-  function pedirAoTerminal(computadorId, comando) {
+  function pedirAoTerminal(computadorId, agenteId, comando) {
     return new Promise((resolve) => {
       const s = net.connect(terminal);
       let corpo = '';
@@ -534,7 +534,7 @@ export function criarSupervisor(op) {
       s.on('data', (b) => { corpo += b; });
       s.on('error', () => resolve({ erro: 'sem_resposta' }));
       s.on('close', () => { try { resolve(JSON.parse(corpo)); } catch { resolve({ erro: 'sem_resposta' }); } });
-      s.end(JSON.stringify({ computadorId, comando }));
+      s.end(JSON.stringify({ computadorId, agenteId, comando }));
     });
   }
 
@@ -549,7 +549,7 @@ export function criarSupervisor(op) {
       let extra = {};
       let pedido = cmd.acao;
       if (cmd.acao.tipo === 'terminal') {
-        const r = await pedirAoTerminal(c.id, cmd.acao.comando);
+        const r = await pedirAoTerminal(c.id, cmd.agenteId, cmd.acao.comando);
         if (r.erro) {
           log(`terminal de ${cmd.agenteId}: ${r.erro}`);
           return falhou(cmd.id, r.erro === 'nao_iniciou' ? 'nao_iniciou' : 'acao_falhou');

@@ -1,13 +1,13 @@
 // definido em 2026-10-22 (NOD-96 PR 2, ADR-122 §4): o terminal do computador da pessoa. Roda como `nod-pc-term`
 // (nod-computador-terminal.service), separado do supervisor: escreve só no workspace, não tem DISPLAY e herda o mesmo
 // IPAddressDeny. Quem fala com ele é só o supervisor (socket 0660, grupo nod-pc). Um pedido por conexão:
-// {computadorId, comando} → {saida, codigoSaida}, como a ação `terminal` do runtime de hoje.
+// {computadorId, agenteId, comando} → {saida, codigoSaida}, como a ação `terminal` do runtime de hoje.
 import { clearTimeout, setTimeout } from 'node:timers';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
-import { access, unlink } from 'node:fs/promises';
+import { chmod, mkdir, unlink } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 export const PRAZO_TERMINAL_MS = 20_000;
@@ -50,7 +50,7 @@ export function rodarComando({ workspace, comando, prazoMs = PRAZO_TERMINAL_MS, 
   });
 }
 
-/** O servidor do terminal. `raiz`: /var/lib/nod-computador; o workspace é raiz/<id>/workspace. */
+/** O servidor do terminal. `raiz`: /var/lib/nod-computador; cada bot usa raiz/<id>/workspace/<agenteId>. */
 export function criarServidorTerminal({ raiz }) {
   return net.createServer({ allowHalfOpen: true }, (socket) => {
     let corpo = '';
@@ -69,12 +69,12 @@ export function criarServidorTerminal({ raiz }) {
         return;
       }
       const comando = typeof pedido?.comando === 'string' ? pedido.comando : '';
-      if (!ID_VALIDO.test(String(pedido?.computadorId ?? '')) || !comando.trim() || comando.length > 8000) {
+      if (!ID_VALIDO.test(String(pedido?.computadorId ?? '')) || !ID_VALIDO.test(String(pedido?.agenteId ?? '')) || !comando.trim() || comando.length > 8000) {
         socket.end(JSON.stringify({ erro: 'acao_falhou' }));
         return;
       }
-      const workspace = path.join(raiz, pedido.computadorId, 'workspace');
-      if (!(await access(workspace).then(() => true, () => false))) {
+      const workspace = path.join(raiz, pedido.computadorId, 'workspace', pedido.agenteId);
+      if (!(await mkdir(workspace, { recursive: true, mode: 0o2770 }).then(() => chmod(workspace, 0o2770)).then(() => true, () => false))) {
         socket.end(JSON.stringify({ erro: 'nao_iniciou' }));
         return;
       }
