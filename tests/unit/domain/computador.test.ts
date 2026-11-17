@@ -10,6 +10,8 @@ it("valida controle nativo, atalhos, áudio e operações de arquivo", () => {
   expect(validarAcaoComputador({tipo:"ler_texto",caminho:"/workspace/a.txt"})).toEqual({tipo:"ler_texto",caminho:"a.txt",inicio:0});
   expect(alteraComputador({tipo:"ler_texto",caminho:"a.txt",inicio:0})).toBe(false);
   expect(alteraComputador({tipo:"gravar_texto",caminho:"a.txt",texto:"Olá",revisao:"novo"})).toBe(true);
+  expect(validarAcaoComputador({tipo:"gravar_arquivo",caminho:"limite.bin",base64:Buffer.alloc(524_288).toString("base64")})).toMatchObject({tipo:"gravar_arquivo"});
+  expect(()=>validarAcaoComputador({tipo:"gravar_arquivo",caminho:"grande.bin",base64:Buffer.alloc(524_289).toString("base64")})).toThrow("entrada_invalida");
 });
 it.each(["/etc/passwd","../outro","/workspacex/segredo","a/../../b","a\\b","a\0b"])("recusa caminho fora do workspace: %s", caminho => {
   expect(()=>validarAcaoComputador({tipo:"ler_arquivo",caminho})).toThrow("entrada_invalida");

@@ -217,6 +217,8 @@ export function validarAcaoComputador(valor: unknown): AcaoComputador {
     case "gravar_arquivo": {
       const base64 = texto("base64", 699052);
       if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) throw new ErroDeDominio("entrada_invalida");
+      const bytes = base64.length / 4 * 3 - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+      if (bytes > 524_288) throw new ErroDeDominio("entrada_invalida");
       return { tipo: a.tipo, caminho: caminho(), base64 };
     }
     case "anexar": return { tipo: a.tipo, quadro: quadro(), caminho: caminho() };
