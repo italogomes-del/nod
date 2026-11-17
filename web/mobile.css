@@ -29,6 +29,8 @@
   .gvn-acao-texto, .gv-aba { min-height: 44px; }
   .gvn-nome { min-height: 44px; }
   .gvn-sub { min-height: 44px; }
+  /* QA 2026-11-17: rebaixar ou revogar um acesso é uma ação sensível; os dois controles precisam do alvo inteiro. */
+  .detalhes .bt.link.sm, .detalhes .gv-bt { min-height: 44px; }
   /* Revisão da NOD-349: a chave da rotina (30×18) ganha área de toque de 44 px sem mudar o desenho; + Nova também. */
   .detalhe-rotina .chave::after { content: ""; position: absolute; inset: -13px -7px; }
   .gv-secao-cab .gv-link { min-height: 44px; }
