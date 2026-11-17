@@ -33,6 +33,11 @@
 .cc-lembrete p { margin: 0; }
 .mc-conta { margin: 4px 12px 2px; font-size: 13px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+@media (hover: none) and (pointer: coarse) {
+  .cc-cartao .bt { min-width: 44px; min-height: 44px; }
+  .cc-campo input { min-height: 44px; box-sizing: border-box; }
+}
+
 /* NOD-346 · Minha conta (protótipo aprovado da Jornada 3). Só tokens. */
 .conta-pagina { width: min(760px, 100%); margin: 0 auto; padding: 4px 0 72px; color: var(--ink); }
 .conta-cab { display: flex; align-items: center; gap: 14px; margin: 0 0 22px; }
