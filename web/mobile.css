@@ -424,6 +424,8 @@
   .form-dupla { grid-template-columns: minmax(0, 1fr); }
   .apps-grid, .cartoes { grid-template-columns: minmax(0, 1fr); }
   .mac-agora { grid-template-columns: minmax(0, 1fr); }
+  /* QA de 2026-11-17: as ações da rotina e as decisões do diálogo de outra execução mediam 32–40 px. */
+  .tela-rotinas .acoes .bt, .bot-dialogo .acoes .bt { min-height: 44px; }
   dialog { max-width: calc(100vw - 20px); max-height: calc(var(--altura-visivel, 100dvh) - 24px); overflow: auto; }
   .bot-menu, .bot-menu.menu-conta { max-width: calc(100vw - 24px); }
   .raio-x { width: 100vw; }
