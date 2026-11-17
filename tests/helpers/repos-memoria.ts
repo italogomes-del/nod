@@ -3586,7 +3586,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { turnoId: t.id, agenteId: t.agenteId, estado: t.estado, custoUsd: t.custoUsd, criadoEm: t.criadoEm, composicao: r?.composicao ?? null, execucao: r?.execucao ?? null };
       },
       async ultimaJanela(conversaId, agenteId, modelo) {
-        const t = doTenant(b.turnos).filter((x) => x.conversaId === conversaId && x.agenteId === agenteId && x.modelo === modelo).sort((x, y) => y.criadoEm - x.criadoEm).slice(0, TURNOS_DA_JANELA)
+        const t = doTenant(b.turnos).filter((x) => x.conversaId === conversaId && x.agenteId === agenteId && (b.raioX.get(x.id)?.composicao?.modelo ?? x.modelo) === modelo).sort((x, y) => y.criadoEm - x.criadoEm).slice(0, TURNOS_DA_JANELA)
           .find((x) => typeof b.raioX.get(x.id)?.execucao?.janela === "number");
         return t ? b.raioX.get(t.id)?.execucao?.janela ?? null : null;
       },
