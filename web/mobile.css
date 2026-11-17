@@ -476,6 +476,18 @@
   .atv-filtro { min-height: 44px; padding: 8px 14px; }
   .atv-botao { min-height: 44px; }
   .atv-dia { min-height: 44px; }
+  /* QA de 2026-11-17: entrar numa conta é uma jornada sensível e os links, código e recuperação herdavam a densidade
+     do desktop (16–42 px). O formulário empilha no espaço estreito da linha para o campo não encolher a 26 px. */
+  .cl-login-cab .ob-link,
+  .cl-passos .cl-link,
+  .cl-passos .ia-codigo .ob-link,
+  .cl-terminal .ob-link,
+  .cl-login-acoes :is(.ob-link, .bt),
+  .cl-terminal-link,
+  .cl-codigo .bt { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .cl-codigo { flex-direction: column; }
+  .cl-codigo input { width: 100%; min-width: 44px; min-height: 44px; box-sizing: border-box; }
+  .cl-codigo .bt { width: 100%; }
   /* NOD-70: abas, Carregar mais, Exportar e Baixar com 44 px; os filtros das Decisões rolam de lado numa linha; a decisão
      aberta vira um cartão (folha) por cima da linha seguinte. */
   .atv-aba, .dec-baixar, .dec-mais .atv-link, .dec-exportar, .dec-detalhe .atv-link, .atv-revisor .atv-link[data-act="decisoes-negadas"] { min-height: 44px; }
