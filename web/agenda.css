@@ -217,6 +217,10 @@ button.ag-linha:hover { background: var(--surface-raised); }
 .ag-folha-item { display: flex; align-items: center; width: 100%; min-height: 52px; padding: 0 20px; border: 0; border-top: 1px solid var(--line); background: none;
   font: 400 16px/1.2 var(--font-sans); color: var(--ink); text-align: left; cursor: pointer; }
 .ag-folha-item:active { background: var(--surface-selected); }
+.ag-folha-pausar { padding: 10px 20px 4px; border-top: 1px solid var(--line); }
+.ag-folha-pausar .ag-pausar-ate { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+.ag-folha-pausar .ag-pausar-ate input, .ag-folha-pausar .ag-link { min-height: 44px; }
+.ag-folha-pausar .ag-pausar-ate input { min-width: 0; width: 100%; font-size: 16px; }
 .ag-menu .ag-folha-item:first-child { border-top: 0; }
 .ag-cel.ag-vazio, .ag-cel .ag-vazio { padding: 40px 24px; }
 

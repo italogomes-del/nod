@@ -345,6 +345,9 @@ describe("a tela da agenda", () => {
     expect(toque).toContain('class="ag-chips"');
     expect(toque).toContain('class="ag-folha" role="dialog" aria-modal="true" tabindex="-1"');
     expect(toque).toContain('data-act="agenda-fechar"');
+    expect(toque).toContain('class="ag-folha-pausar"');
+    expect(toque).toContain('data-act="pausar-rotina-escolhida"');
+    expect(toque).toContain('type="datetime-local"');
     expect(toque).not.toContain('class="ag-det"');
     const menu = renderAgendaRotinas(com({ dto: BASE_DTO, ui: { menu: chave } }), true);
     expect(menu).toContain('role="menu"');

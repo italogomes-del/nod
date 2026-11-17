@@ -327,10 +327,11 @@ function folhaDoCelular(ctx: Ctx, visao: VisaoAgenda | null): string {
   const titulo = tituloDaRotina(l.rotina.instrucao);
   const b = bloqueioDe(ctx, l.rotina.id);
   const itens = acoesDaRotina(ctx, l.rotina).map((a) => `<button type="button" class="ag-folha-item" data-act="${esc(a.act)}"${Object.entries(a.dados).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("")}>${esc(a.rotulo)}</button>`).join("");
+  const escolher = l.rotina.minha && l.rotina.estado === "ativa" ? pausarAteEscolhida(l.rotina, ctx.estado.agora) : "";
   return `${veu}<div class="ag-folha" role="dialog" aria-modal="true" tabindex="-1" aria-label="${esc(`${titulo}, ${nomeDoDia(l.item.dia, ctx.hoje)}`)}">
     <div class="ag-fcab">${mascote(l.bot, "ag-masc")}<div><h3>${esc(titulo)}</h3><p class="ag-fquando">${ponto(tomDoPonto(l))}${esc(`${rotuloDaLinha(l)} · ${nomeDoDia(l.item.dia, ctx.hoje)}${l.item.tipo === "faixa" ? "" : ` ${hora(l.item.instante)}`}`)}</p></div></div>
     <p class="ag-frase">${esc(frase)}</p><p class="ag-meta">${meta.map(esc).join("<br>")}</p>
-    ${b ? `<div class="ag-folha-parada">${botaoDaParada(b, "pri")}</div>` : ""}${itens}
+    ${b ? `<div class="ag-folha-parada">${botaoDaParada(b, "pri")}</div>` : ""}${itens}${escolher ? `<div class="ag-folha-pausar">${escolher}</div>` : ""}
   </div>`;
 }
 
