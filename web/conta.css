@@ -114,6 +114,7 @@
   .entrar-primeiro .cc-sem-conta .cc-titulo, .entrar-primeiro .cc-sem-conta .cc-texto { display: none; }
   .entrar-primeiro .cc-sem-conta .cc-acoes, .entrar-primeiro .cc-sem-conta .bt { width: 100%; justify-content: center; }
   .conta-pagina { padding-bottom: 54px; }
+  .conta-pagina button, .conta-pagina .mc-foto { min-height: 44px; }
   .conta-cab { margin-bottom: 14px; }
   .conta-cab p { font-size: 13px; }
   .conta-abas { margin-inline: 0; padding-inline: 0; margin-bottom: 22px; }
