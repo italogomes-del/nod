@@ -358,6 +358,20 @@ describe("driver Orgo (pela documentação, sem conta)", () => {
     expect(e.detalhe).not.toContain("sk_live_vazada");
   });
 
+  it("limite do plano em 403 não acusa a chave e não repete o corpo externo", async () => {
+    const p = criarProvedorOrgo({ env, chaveDe: async () => CHAVE, fetchImpl: async () => ({
+      status: 403,
+      ok: false,
+      json: async () => ({ code: "ACCOUNT_COMPUTER_LIMIT", error: "conta de cliente confidencial" }),
+      text: async () => '{"code":"ACCOUNT_COMPUTER_LIMIT"}',
+    }) });
+    const e = (await p.iniciar(ref).catch((x: unknown) => x)) as FalhaComputador;
+    expect(e.motivo).toBe("limite_de_computadores");
+    expect(e.detalhe).toContain("Pare outro computador no Orgo");
+    expect(e.detalhe).not.toContain("chave recusada");
+    expect(e.detalhe).not.toContain("conta de cliente confidencial");
+  });
+
   it("as ações do bot passam pela camada de primitivas e viram as rotas do Orgo", async () => {
     const f = orgoFalso({ status: "running", existe: true });
     const orgo = criarProvedorOrgo({ env, chaveDe: async () => CHAVE, fetchImpl: f.fetchImpl, pausa: async () => undefined });

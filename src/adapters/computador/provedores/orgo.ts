@@ -29,6 +29,18 @@ export const BASE_ORGO = "https://www.orgo.ai/api";
 const PRAZO_HTTP_MS = 60_000;
 const PRAZO_PRONTO_MS = 180_000;
 const RESOLUCAO = "1280x800x24";
+const CODIGOS_LIMITE_ORGO = new Set([
+  "ACCOUNT_COMPUTER_LIMIT",
+  "CHANGE_PLAN",
+  "CLIENT_PRICE_EXCEEDED",
+  "CONTACT_US_FOR_SIZE",
+  "PER_COMPUTER_CPU_CAP",
+  "PER_COMPUTER_RAM_CAP",
+  "PLAN_LIMIT",
+  "PLAN_REFUSED",
+  "RAM_ADDON",
+  "VCPU_ADDON",
+]);
 
 export const CAPACIDADES_ORGO: CapacidadesProvedor = {
   retomarComMemoria: true,
@@ -136,12 +148,17 @@ export function criarProvedorOrgo(o: OpcoesOrgo): ProvedorDeComputador {
       clearTimeout(timer);
     }
     if (r.ok) return (await r.json().catch(() => ({}))) as T;
-    // A resposta é conteúdo externo e pode ecoar cabeçalhos ou dados da pessoa. O log/erro leva só rota e status.
+    // A resposta é conteúdo externo e pode ecoar cabeçalhos ou dados da pessoa. Só um código fechado da documentação
+    // distingue limite de permissão no 403; o log/erro leva apenas rota e status.
+    const resposta = await r.json().catch(() => null);
+    const codigo = resposta && typeof resposta === "object" && typeof (resposta as { code?: unknown }).code === "string"
+      ? (resposta as { code: string }).code
+      : null;
     const detalhe = `Orgo ${metodo} ${caminho.split("?")[0]} → ${r.status}`;
-    if (r.status === 401 || r.status === 403) throw new FalhaComputador("nao_iniciou", { detalhe: `${detalhe} (chave recusada ou sem permissão)` });
+    if (r.status === 401 || (r.status === 403 && !CODIGOS_LIMITE_ORGO.has(codigo ?? ""))) throw new FalhaComputador("nao_iniciou", { detalhe: `${detalhe} (chave recusada ou sem permissão)` });
     if (r.status === 404) throw new FalhaComputador("sem_resposta", { detalhe });
     if (r.status === 409) throw new FalhaComputador("ocupado", { detalhe });
-    if (r.status === 402 || r.status === 429) throw new FalhaComputador("limite_de_computadores", { detalhe: `${detalhe}. Pare outro computador no Orgo ou ajuste o limite do plano e tente de novo.` });
+    if (r.status === 402 || r.status === 429 || (r.status === 403 && CODIGOS_LIMITE_ORGO.has(codigo ?? ""))) throw new FalhaComputador("limite_de_computadores", { detalhe: `${detalhe}. Pare outro computador no Orgo ou ajuste o limite do plano e tente de novo.` });
     throw new FalhaComputador(r.status >= 500 ? "sem_resposta" : "acao_falhou", { detalhe });
   }
 
